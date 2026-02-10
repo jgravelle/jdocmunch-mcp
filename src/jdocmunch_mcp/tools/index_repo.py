@@ -93,18 +93,16 @@ async def discover_doc_files(
         if name_lower.startswith("readme") and name_lower.endswith(".md"):
             doc_files.append(item["name"])
 
-    # Check for docs directory
-    docs_contents = await fetch_github_contents(owner, repo, "docs", token)
-    await _collect_md_files(owner, repo, "docs", docs_contents, doc_files, token)
-
-    # Check for doc directory
-    doc_contents = await fetch_github_contents(owner, repo, "doc", token)
-    await _collect_md_files(owner, repo, "doc", doc_contents, doc_files, token)
+    # Check common documentation directories
+    doc_dirs = ["docs", "doc", "documentation"]
+    for doc_dir in doc_dirs:
+        dir_contents = await fetch_github_contents(owner, repo, doc_dir, token)
+        await _collect_doc_files(owner, repo, doc_dir, dir_contents, doc_files, token)
 
     return doc_files
 
 
-async def _collect_md_files(
+async def _collect_doc_files(
     owner: str,
     repo: str,
     base_path: str,
@@ -113,17 +111,20 @@ async def _collect_md_files(
     token: Optional[str] = None,
     max_depth: int = 3,
 ) -> None:
-    """Recursively collect markdown files from a directory."""
+    """Recursively collect documentation files from a directory."""
     if max_depth <= 0:
         return
 
+    # Supported doc extensions
+    doc_extensions = (".md", ".markdown")
+
     for item in contents:
-        if item["type"] == "file" and item["name"].endswith(".md"):
+        if item["type"] == "file" and item["name"].lower().endswith(doc_extensions):
             doc_files.append(f"{base_path}/{item['name']}")
         elif item["type"] == "dir":
             sub_path = f"{base_path}/{item['name']}"
             sub_contents = await fetch_github_contents(owner, repo, sub_path, token)
-            await _collect_md_files(
+            await _collect_doc_files(
                 owner, repo, sub_path, sub_contents, doc_files, token, max_depth - 1
             )
 
