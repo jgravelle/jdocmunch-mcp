@@ -1,3 +1,17 @@
+## Read documentation using **1–3% of the usual tokens**
+
+Documentation queries normally require loading entire README and docs folders into context, wasting tens of thousands of tokens per question.
+
+**jDocMunch converts documentation into indexed, section-level retrieval** so agents load only the relevant paragraphs instead of entire files.
+
+| Task                         | Traditional approach | With jDocMunch          |
+| ---------------------------- | -------------------- | ----------------------- |
+| Answer doc question          | ~50,000 tokens       | ~1–2k tokens            |
+| Multi-query research session | Linear token growth  | Mostly cached retrieval |
+| Large repo docs              | Slow + expensive     | Instant + predictable   |
+
+Index once, navigate intelligently, retrieve only what matters.
+
 # jDocMunch MCP
 
 ## Precision Documentation Intelligence for AI Agents
