@@ -1,9 +1,11 @@
 # Token Usage Comparison: With MCP vs Without MCP
 
 ## Test Setup
-- **Repository**: openclaw/openclaw (583 documentation files)
-- **Session**: 3 related queries about Discord integration
-- **Queries**:
+
+* **Repository:** `openclaw/openclaw` (583 documentation files)
+* **Session:** Three related queries about Discord integration
+* **Queries:**
+
   1. "discord bot setup"
   2. "discord configuration"
   3. "discord webhook"
@@ -12,143 +14,149 @@
 
 ## Side-by-Side Comparison
 
-### Query 1: "discord bot setup"
+### Query 1 — "discord bot setup"
 
-| Step | Without MCP | With MCP |
-|------|-------------|----------|
-| **1. Discovery** | List files via API (1 call) | Load local index (0 calls) |
-| **2. Fetch Data** | Download 583 files (**811,756 tokens**) | Load TOC (**708,367 tokens**) |
-| **3. Search** | Scan all content locally | Search summaries (**375 tokens**) |
-| **4. Retrieve** | Parse matches locally | Get 2 sections (**52 tokens**) |
-| **API Calls** | **584** | **0** |
-| **Tokens** | **811,756** | **708,794** |
-| **Time** | ~30-60s (network) | ~1s (local) |
+| Step          | Without MCP                             | With MCP                            |
+| ------------- | --------------------------------------- | ----------------------------------- |
+| Discovery     | List files via API (1 call)             | Load local index (0 calls)          |
+| Fetch data    | Download 583 files (**811,756 tokens**) | Load TOC (**708,367 tokens**)       |
+| Search        | Scan full content locally               | Search summaries (**375 tokens**)   |
+| Retrieve      | Parse matches locally                   | Retrieve 2 sections (**52 tokens**) |
+| **API calls** | **584**                                 | **0**                               |
+| **Tokens**    | **811,756**                             | **708,794**                         |
+| **Time**      | ~30–60s (network)                       | ~1s (local)                         |
 
-### Query 2: "discord configuration"
+---
 
-| Step | Without MCP | With MCP |
-|------|-------------|----------|
-| **1. Discovery** | List files via API (1 call) | Use cached index (0 calls) |
-| **2. Fetch Data** | Download 583 files (**811,756 tokens**) | Use cached TOC (**0 tokens**) |
-| **3. Search** | Scan all content locally | Search summaries (**358 tokens**) |
-| **4. Retrieve** | Parse matches locally | Get 2 sections (**176 tokens**) |
-| **API Calls** | **584** | **0** |
-| **Tokens** | **811,756** | **534** |
-| **Time** | ~30-60s (network) | ~0.1s (local) |
+### Query 2 — "discord configuration"
 
-### Query 3: "discord webhook"
+| Step          | Without MCP                             | With MCP                             |
+| ------------- | --------------------------------------- | ------------------------------------ |
+| Discovery     | List files via API (1 call)             | Cached index (0 calls)               |
+| Fetch data    | Download 583 files (**811,756 tokens**) | Cached TOC (**0 tokens**)            |
+| Search        | Scan full content locally               | Search summaries (**358 tokens**)    |
+| Retrieve      | Parse matches locally                   | Retrieve 2 sections (**176 tokens**) |
+| **API calls** | **584**                                 | **0**                                |
+| **Tokens**    | **811,756**                             | **534**                              |
+| **Time**      | ~30–60s (network)                       | ~0.1s (local)                        |
 
-| Step | Without MCP | With MCP |
-|------|-------------|----------|
-| **1. Discovery** | List files via API (1 call) | Use cached index (0 calls) |
-| **2. Fetch Data** | Download 583 files (**811,756 tokens**) | Use cached TOC (**0 tokens**) |
-| **3. Search** | Scan all content locally | Search summaries (**366 tokens**) |
-| **4. Retrieve** | Parse matches locally | Get 2 sections (**176 tokens**) |
-| **API Calls** | **584** | **0** |
-| **Tokens** | **811,756** | **542** |
-| **Time** | ~30-60s (network) | ~0.1s (local) |
+---
+
+### Query 3 — "discord webhook"
+
+| Step          | Without MCP                             | With MCP                             |
+| ------------- | --------------------------------------- | ------------------------------------ |
+| Discovery     | List files via API (1 call)             | Cached index (0 calls)               |
+| Fetch data    | Download 583 files (**811,756 tokens**) | Cached TOC (**0 tokens**)            |
+| Search        | Scan full content locally               | Search summaries (**366 tokens**)    |
+| Retrieve      | Parse matches locally                   | Retrieve 2 sections (**176 tokens**) |
+| **API calls** | **584**                                 | **0**                                |
+| **Tokens**    | **811,756**                             | **542**                              |
+| **Time**      | ~30–60s (network)                       | ~0.1s (local)                        |
 
 ---
 
 ## Session Totals
 
-| Metric | Without MCP | With MCP | Savings |
-|--------|-------------|----------|---------|
-| **Total Tokens** | 2,435,268 | 709,870 | **70.9%** |
-| **Total API Calls** | 1,752 | 0 | **100%** |
-| **Avg per Query** | 811,756 | 236,623 | **70.9%** |
-| **Network Time** | ~2-3 minutes | 0 | **100%** |
+| Metric                | Without MCP  | With MCP | Savings   |
+| --------------------- | ------------ | -------- | --------- |
+| **Total tokens**      | 2,435,268    | 709,870  | **70.9%** |
+| **API calls**         | 1,752        | 0        | **100%**  |
+| **Average per query** | 811,756      | 236,623  | **70.9%** |
+| **Network time**      | ~2–3 minutes | 0        | **100%**  |
 
 ---
 
-## Scale Projections (Monthly Usage)
+## Scale Projections (Monthly)
 
-| Queries/Month | Without MCP | With MCP | Savings |
-|---------------|-------------|----------|---------|
-| 1 | 811,756 | 708,794 | 12.7% |
-| 5 | 4,058,780 | 710,698 | **82.5%** |
-| 20 (1 day) | 16,235,120 | 716,410 | **95.6%** |
-| 100 (1 week) | 81,175,600 | 741,058 | **99.1%** |
-| 1,000 | 811,756,000 | 1,246,342 | **99.8%** |
+| Queries / Month | Without MCP | With MCP  | Savings   |
+| --------------- | ----------- | --------- | --------- |
+| 1               | 811,756     | 708,794   | 12.7%     |
+| 5               | 4,058,780   | 710,698   | **82.5%** |
+| 20              | 16,235,120  | 716,410   | **95.6%** |
+| 100             | 81,175,600  | 741,058   | **99.1%** |
+| 1,000           | 811,756,000 | 1,246,342 | **99.8%** |
 
 ---
 
-## Key Insights
+## Key Observations
 
-### Without MCP (Traditional Approach)
+### Traditional Retrieval (Without MCP)
+
 ```
-Every query requires:
-├── 1 API call to list files
-├── 583 API calls to fetch each file
-├── 811,756 tokens downloaded
-└── Full local search through all content
-
-Problems:
-× Rate limited by GitHub API (60 requests/hour unauthenticated)
-× Slow (network latency for 584 requests)
-× Expensive (re-fetching same content repeatedly)
-× Unpredictable costs (scales linearly with queries)
+Per query:
+├── 1 request to list files
+├── 583 requests to download files
+├── ~811K tokens transferred
+└── Full local search of entire repository
 ```
 
-### With MCP (Indexed Approach)
+Limitations:
+
+* API rate-limit exposure
+* High network latency
+* Linear cost growth per query
+* Repeated transfer of unchanged data
+
+---
+
+### Indexed Retrieval (With MCP)
+
 ```
-One-time setup:
+One-time:
 ├── Index repository locally
-└── Store summaries and metadata
+└── Generate summaries and metadata
 
-Per-query:
-├── Load TOC from local cache (708K tokens once)
-├── Search summaries (300-400 tokens)
-├── Retrieve relevant sections only (50-200 tokens)
+Per query:
+├── Load cached index
+├── Search summaries (~300–400 tokens)
+├── Retrieve only relevant sections (~50–200 tokens)
 └── 0 API calls
+```
 
 Benefits:
-✓ No API rate limits
-✓ Instant response (< 1 second)
-✓ 70-99% token savings
-✓ Predictable costs
-✓ Works offline
-```
+
+* No rate-limit dependency
+* Sub-second response times
+* 70–99% token reduction
+* Predictable operating cost
+* Fully offline querying after indexing
 
 ---
 
-## Cost Analysis (Estimates)
+## Cost Model (Illustrative)
 
-Assuming Claude API pricing (~$0.01 per 1K tokens):
+Assuming $0.01 per 1K tokens:
 
-| Usage Pattern | Without MCP | With MCP | Monthly Savings |
-|---------------|-------------|----------|-----------------|
-| Developer (20 queries/day) | $3,571.73 | $311.92 | **$3,259.81** |
-| Team (100 queries/day) | $17,858.65 | $1,559.62 | **$16,299.03** |
-| Enterprise (500 queries/day) | $89,293.25 | $7,798.08 | **$81,495.17** |
-
----
-
-## Cost Breakdown: Indexing vs Query
-
-It is important to separate **one-time indexing cost** from **per-query cost**:
-
-| Phase | Tokens | Frequency | Notes |
-|-------|--------|-----------|-------|
-| **Indexing** | ~708K | Once per repo | Downloads files, parses sections, generates summaries |
-| **Per-query (cached)** | ~500-600 | Every query | Search + retrieve from local cache, 0 API calls |
-| **Incremental reindex** | Varies | When files change | Only re-parses changed files (hash comparison) |
-
-### Amortization
-
-The indexing cost is paid once and amortized across all queries. After just 2 queries, the MCP approach is cheaper than re-fetching.
+| Usage Pattern                | Without MCP | With MCP  | Estimated Monthly Savings |
+| ---------------------------- | ----------- | --------- | ------------------------- |
+| Developer (20 queries/day)   | $3,571.73   | $311.92   | **$3,259.81**             |
+| Team (100 queries/day)       | $17,858.65  | $1,559.62 | **$16,299.03**            |
+| Enterprise (500 queries/day) | $89,293.25  | $7,798.08 | **$81,495.17**            |
 
 ---
 
-## How to Reproduce
+## Indexing vs Query Cost
 
-These benchmarks can be reproduced using the included benchmark harness:
+| Phase               | Tokens   | Frequency           | Notes                                             |
+| ------------------- | -------- | ------------------- | ------------------------------------------------- |
+| Indexing            | ~708K    | Once per repository | Parse files, extract sections, generate summaries |
+| Cached queries      | ~500–600 | Per query           | Local search and retrieval                        |
+| Incremental reindex | Varies   | On file changes     | Only modified files reprocessed                   |
+
+Indexing cost is amortized quickly; after only a few queries, indexed retrieval becomes significantly cheaper than repeated full-repository fetches.
+
+---
+
+## Reproducing the Benchmark
 
 ```bash
-# Generate datasets and run benchmarks
 python benchmarks/run_benchmark.py --generate --output results.json
+```
 
-# Or index a real repo and query it
+Or index a repository directly:
+
+```bash
 python -c "
 import asyncio
 from jdocmunch_mcp.tools.index_local import index_local
@@ -156,20 +164,15 @@ asyncio.run(index_local('path/to/repo', use_ai_summaries=False))
 "
 ```
 
-See `benchmarks/README.md` for full methodology and dataset descriptions.
+See `benchmarks/README.md` for full methodology.
 
 ---
 
-## Conclusion
+## Summary
 
-**jdocmunch-mcp provides dramatic token savings:**
+Indexed documentation retrieval enables a fundamental shift:
 
-- **Single query**: ~13% savings (mainly from not re-fetching)
-- **Multiple queries**: 70-99% savings (caching benefits)
-- **At scale**: 99.8% savings (1000+ queries)
+* From **“download everything and search”**
+* To **“index once and navigate precisely”**
 
-**The MCP approach shifts from:**
-- "Download everything, search locally" (expensive, slow)
-- "Index once, query intelligently" (cheap, fast)
-
-The larger the repository and the more queries you make, the greater the savings!
+As repository size and query volume grow, the efficiency advantage increases dramatically, approaching **two orders of magnitude reduction** in token usage.
