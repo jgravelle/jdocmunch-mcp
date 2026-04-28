@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jgravelle-jdocmunch-mcp-badge.png)](https://mseep.ai/app/jgravelle-jdocmunch-mcp)
+
 <!-- mcp-name: io.github.jgravelle/jdocmunch-mcp -->
 
 ## Stop Feeding Documentation Trees to Your AI
