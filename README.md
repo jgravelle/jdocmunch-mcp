@@ -282,6 +282,25 @@ MiniMax, or GLM-5, include the optional dependency in the launcher command:
 }
 ```
 
+For fully offline embeddings (no API key required), include the
+`sentence-transformers` optional dependency. The default model
+(`all-MiniLM-L6-v2`, ~80 MB) downloads on first use into
+`~/.cache/huggingface/`:
+
+```json
+{
+  "mcpServers": {
+    "jdocmunch": {
+      "command": "uvx",
+      "args": ["--with", "sentence-transformers", "jdocmunch-mcp"],
+      "env": {
+        "JDOCMUNCH_EMBEDDING_PROVIDER": "sentence-transformers"
+      }
+    }
+  }
+}
+```
+
 After saving the config, **restart Claude Desktop / Claude Code**.
 
 ### Claude Code hooks (recommended)

@@ -26,6 +26,7 @@ openai = ["openai>=1.0.0"]
 minimax = ["openai>=1.0.0"]
 zhipu = ["openai>=1.0.0"]
 semantic = ["google-generativeai>=0.8.0"]
+sentence-transformers = ["sentence-transformers>=5.4.1"]
 
 [project.scripts]
 jdocmunch-mcp = "jdocmunch_mcp.server:main"
