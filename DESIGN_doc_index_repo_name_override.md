@@ -94,6 +94,9 @@ Meaning:
 - `source_repo` is the original GitHub source repository.
 - `source_repo_at_sha` is the upstream source snapshot citation.
 
+`source_repo` is persisted on the stored `DocIndex` so incremental calls can
+distinguish "same storage name, different upstream source" from a true no-op.
+
 ## Implementation Plan
 
 1. Add `name: Optional[str] = None` to `index_repo()`.
@@ -132,9 +135,10 @@ Meaning:
    - `source_repo`
    - `source_repo_at_sha` when `head_sha` is certified
 
-8. Update MCP schema for `doc_index_repo` with the optional `name` property.
-9. Update MCP dispatch to pass `name=arguments.get("name")`.
-10. Update `SPEC.md` after behavior and tests are in place.
+8. Persist `source_repo` on `DocIndex` and include it in `doc_list_repos`.
+9. Update MCP schema for `doc_index_repo` with the optional `name` property.
+10. Update MCP dispatch to pass `name=arguments.get("name")`.
+11. Update `SPEC.md` after behavior and tests are in place.
 
 ## Tests
 

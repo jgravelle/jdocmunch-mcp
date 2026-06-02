@@ -40,12 +40,15 @@ Walks the local directory with full security controls: path traversal prevention
 ```json
 {
   "url": "owner/repo",
+  "name": "optional-safe-storage-name",
   "use_ai_summaries": true,
   "incremental": true
 }
 ```
 
 Fetches documentation files via the GitHub API, parses sections, and saves to local storage.
+
+`name` (optional): stores the index under `owner/name` instead of `owner/repo`. This is a storage-name override, not a moving alias. The value must be a single safe storage component using only letters, numbers, dot, underscore, and hyphen; `/`, `\`, and `@` are rejected. When set, responses still include the upstream source identity as `source_repo`, and certified indexes include both `repo_at_sha` for the stored index and `source_repo_at_sha` for the upstream GitHub repository.
 
 `incremental` (default `true`): first checks the HEAD commit SHA — if it matches the stored SHA the call returns immediately without any file fetches. If the SHA differs, only changed files are re-parsed. Set to `false` to force a full re-index.
 
@@ -204,6 +207,7 @@ class DocIndex:
     source_dirty: bool     # True when cached content is not certified clean at head_sha
     sha_certified: bool    # True when the corpus was built under strict repo@sha rules
     source_root: str       # Absolute source folder for local indexes, if known
+    source_repo: str       # Original upstream GitHub repo for named GitHub indexes
 ```
 
 `DocStore` persists each `DocIndex` as JSON plus cached raw document files.

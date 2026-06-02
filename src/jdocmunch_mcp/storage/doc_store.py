@@ -99,6 +99,9 @@ class DocIndex:
     # VuePress grouped-dict sidebar). Empty string when unknown — tools must
     # tolerate the missing case.
     source_root: str = ""
+    # Original upstream repository for GitHub indexes when storage name differs.
+    # Empty for legacy/local indexes.
+    source_repo: str = ""
 
     def __post_init__(self) -> None:
         # Build O(1) lookup dict once at load time
@@ -432,6 +435,7 @@ class DocStore:
         source_dirty: bool = False,
         sha_certified: bool = False,
         source_root: str = "",
+        source_repo: str = "",
     ) -> "DocIndex":
         """Save index and raw files to storage atomically."""
         if file_hashes is None:
@@ -459,6 +463,7 @@ class DocStore:
             sha_certified=sha_certified,
             bm25_stats=bm25_stats,
             source_root=source_root or "",
+            source_repo=source_repo or "",
         )
 
         index_path = self._index_path(owner, name)
@@ -521,6 +526,7 @@ class DocStore:
             sha_certified=bool(data.get("sha_certified", False)),
             bm25_stats=data.get("bm25_stats", {}),
             source_root=data.get("source_root", ""),
+            source_repo=data.get("source_repo", ""),
         )
 
         # Inject lazy content loader so search can score on body text (B1).
@@ -588,6 +594,7 @@ class DocStore:
         source_dirty=_UNSET,
         sha_certified=_UNSET,
         source_root=_UNSET,
+        source_repo=_UNSET,
     ) -> Optional["DocIndex"]:
         """Incrementally update an existing index.
 
@@ -676,6 +683,7 @@ class DocStore:
             sha_certified=index.sha_certified if sha_certified is _UNSET else bool(sha_certified),
             bm25_stats=bm25_stats,
             source_root=index.source_root if source_root is _UNSET else (source_root or ""),
+            source_repo=index.source_repo if source_repo is _UNSET else (source_repo or ""),
         )
 
         # Save atomically
@@ -762,6 +770,16 @@ class DocStore:
                     row["repo_at_sha"] = repo_at_sha
                 if data.get("source_root"):
                     row["source_root"] = data["source_root"]
+                if data.get("source_repo"):
+                    row["source_repo"] = data["source_repo"]
+                    source_repo_at_sha = format_repo_at_sha(
+                        data["source_repo"],
+                        sha,
+                        source_dirty,
+                        sha_certified,
+                    )
+                    if source_repo_at_sha:
+                        row["source_repo_at_sha"] = source_repo_at_sha
                 repos.append(row)
             except Exception:
                 continue
@@ -807,6 +825,8 @@ class DocStore:
             d["bm25_stats"] = index.bm25_stats
         if getattr(index, "source_root", ""):
             d["source_root"] = index.source_root
+        if getattr(index, "source_repo", ""):
+            d["source_repo"] = index.source_repo
         return d
 
     def _split_repo_at_sha(self, repo: str) -> tuple[str, Optional[str]]:

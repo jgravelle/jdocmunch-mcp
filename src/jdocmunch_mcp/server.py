@@ -282,6 +282,10 @@ def _all_tools() -> list[Tool]:
                         "description": "Generate semantic embeddings for each section. true/false/\"auto\". \"auto\" (default) enables embeddings when an embedding provider is configured, including openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL.",
                         "default": "auto"
                     },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional stored index name override. If omitted, the GitHub repo name is used. Must be a safe storage component: letters, numbers, dot, underscore, and hyphen only."
+                    },
                     "incremental": {
                         "type": "boolean",
                         "description": "When true (default), skip all HTTP fetches if the HEAD commit SHA is unchanged; otherwise only re-index changed files. Set to false to force a full re-index.",
@@ -1680,6 +1684,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 use_embeddings=arguments.get("use_embeddings", "auto"),
                 storage_path=storage_path,
                 incremental=arguments.get("incremental", True),
+                name=arguments.get("name"),
             )
         elif name in ("doc_list_repos", "list_repos"):  # list_repos kept for backward compat
             result = list_repos(storage_path=storage_path)
