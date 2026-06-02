@@ -48,7 +48,7 @@ Walks the local directory with full security controls: path traversal prevention
 
 Fetches documentation files via the GitHub API, parses sections, and saves to local storage.
 
-`name` (optional): stores the index under `owner/name` instead of `owner/repo`. This is a storage-name override, not a moving alias. The value must be a single safe storage component using only letters, numbers, dot, underscore, and hyphen; `/`, `\`, and `@` are rejected. When set, responses still include the upstream source identity as `source_repo`, and certified indexes include both `repo_at_sha` for the stored index and `source_repo_at_sha` for the upstream GitHub repository.
+`name` (optional): stores the index under `owner/name` instead of `owner/repo`. This is a storage-name override, not a moving alias. The value must be a single safe storage component using only letters, numbers, dot, underscore, and hyphen; `/`, `\`, and `@` are rejected. GitHub indexing responses include the upstream source identity as `source_repo`, and certified indexes include both `repo_at_sha` for the stored index and `source_repo_at_sha` for the upstream GitHub repository.
 
 `incremental` (default `true`): first checks the HEAD commit SHA — if it matches the stored SHA the call returns immediately without any file fetches. If the SHA differs, only changed files are re-parsed. Set to `false` to force a full re-index.
 

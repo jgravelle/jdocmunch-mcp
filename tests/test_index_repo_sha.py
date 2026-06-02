@@ -1,6 +1,7 @@
 """Commit-SHA handling for GitHub indexing."""
 
 import importlib
+import json
 
 import pytest
 
@@ -49,11 +50,17 @@ async def test_index_repo_fetches_tree_and_content_at_resolved_sha(tmp_path, mon
     assert result["source_dirty"] is False
     assert result["sha_certified"] is True
     assert result["repo_at_sha"] == f"octo/docs@{sha}"
+    assert result["source_repo"] == "octo/docs"
+    assert result["source_repo_at_sha"] == f"octo/docs@{sha}"
     assert refs == [
         ("tree", sha),
         ("gitignore", sha),
         ("content", sha, "README.md"),
     ]
+
+    listed = list_repos(storage_path=str(tmp_path))
+    assert listed["repos"][0]["source_repo"] == "octo/docs"
+    assert listed["repos"][0]["source_repo_at_sha"] == f"octo/docs@{sha}"
 
 
 @pytest.mark.asyncio
@@ -154,6 +161,48 @@ async def test_index_repo_recovers_legacy_matching_sha_via_pinned_fetch(tmp_path
         ("gitignore", sha),
         ("content", sha, "README.md"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_index_repo_fast_path_backfills_legacy_source_repo_metadata(tmp_path, monkeypatch):
+    mod = importlib.import_module("jdocmunch_mcp.tools.index_repo")
+    sha = "1" * 40
+    content = "# README\n\nLegacy certified content."
+    store = DocStore(base_path=str(tmp_path))
+    store.save_index(
+        "octo",
+        "docs",
+        parse_file(content, "README.md", "octo/docs"),
+        {"README.md": content},
+        {".md": 1},
+        head_sha=sha,
+        sha_certified=True,
+    )
+
+    async def fake_head(owner, repo, token=None, client=None, ref="HEAD"):
+        return sha
+
+    async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
+        raise AssertionError("matching certified legacy index should stay on SHA fast path")
+
+    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
+
+    result = await mod.index_repo(
+        "octo/docs",
+        use_ai_summaries=False,
+        use_embeddings=False,
+        storage_path=str(tmp_path),
+    )
+
+    assert result["success"] is True
+    assert result["message"] == "No changes detected (HEAD SHA unchanged)"
+    assert result["source_repo"] == "octo/docs"
+    assert result["source_repo_at_sha"] == f"octo/docs@{sha}"
+
+    listed = list_repos(storage_path=str(tmp_path))
+    assert listed["repos"][0]["source_repo"] == "octo/docs"
+    assert listed["repos"][0]["source_repo_at_sha"] == f"octo/docs@{sha}"
 
 
 @pytest.mark.asyncio
@@ -277,6 +326,59 @@ async def test_index_repo_custom_name_fast_path_uses_override_storage(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_index_repo_custom_name_same_storage_different_source_does_not_fast_path(tmp_path, monkeypatch):
+    mod = importlib.import_module("jdocmunch_mcp.tools.index_repo")
+    sha = "2" * 40
+    tree_repos = []
+
+    async def fake_head(owner, repo, token=None, client=None, ref="HEAD"):
+        return sha
+
+    async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
+        tree_repos.append(repo)
+        return [{"type": "blob", "path": "README.md", "size": 64}]
+
+    async def fake_gitignore(owner, repo, token=None, client=None, ref="HEAD"):
+        return None
+
+    async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
+        return f"# README\n\nContent from {repo}."
+
+    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
+    monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
+    monkeypatch.setattr(mod, "fetch_file_content", fake_content)
+
+    first = await mod.index_repo(
+        "octo/docs",
+        use_ai_summaries=False,
+        use_embeddings=False,
+        storage_path=str(tmp_path),
+        name="shared",
+    )
+    second = await mod.index_repo(
+        "octo/other",
+        use_ai_summaries=False,
+        use_embeddings=False,
+        storage_path=str(tmp_path),
+        name="shared",
+    )
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert second["repo"] == "octo/shared"
+    assert second["source_repo"] == "octo/other"
+    assert second["source_repo_at_sha"] == f"octo/other@{sha}"
+    assert tree_repos == ["docs", "other"]
+
+    store = DocStore(base_path=str(tmp_path))
+    stored = store.load_index("octo", "shared")
+    assert stored is not None
+    assert stored.source_repo == "octo/other"
+    assert "Content from other." in (tmp_path / "octo" / "shared" / "README.md").read_text()
+
+
+@pytest.mark.asyncio
 async def test_index_repo_custom_name_changed_file_incremental_uses_override_storage(tmp_path, monkeypatch):
     mod = importlib.import_module("jdocmunch_mcp.tools.index_repo")
     state = {"sha": "a" * 40, "body": "First content."}
@@ -325,9 +427,65 @@ async def test_index_repo_custom_name_changed_file_incremental_uses_override_sto
     assert second["repo_at_sha"] == f"octo/docs_changed@{'b' * 40}"
     assert second["source_repo_at_sha"] == f"octo/docs@{'b' * 40}"
 
+    store = DocStore(base_path=str(tmp_path))
+    assert store.load_index("octo", "docs") is None
+    stored = store.load_index("octo", "docs_changed")
+    assert stored is not None
+    assert "Second content." in (tmp_path / "octo" / "docs_changed" / "README.md").read_text()
+
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_name", ["foo@bar", "foo/bar", "", ".."])
+async def test_index_repo_custom_name_fallback_to_head_is_not_certified(tmp_path, monkeypatch):
+    mod = importlib.import_module("jdocmunch_mcp.tools.index_repo")
+
+    async def fake_head(owner, repo, token=None, client=None, ref="HEAD"):
+        return None
+
+    async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
+        return [{"type": "blob", "path": "README.md", "size": 64}]
+
+    async def fake_gitignore(owner, repo, token=None, client=None, ref="HEAD"):
+        return None
+
+    async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
+        return "# README\n\nUncertified custom content."
+
+    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
+    monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
+    monkeypatch.setattr(mod, "fetch_file_content", fake_content)
+
+    result = await mod.index_repo(
+        "octo/docs",
+        use_ai_summaries=False,
+        use_embeddings=False,
+        storage_path=str(tmp_path),
+        name="docs_uncertified",
+    )
+
+    assert result["success"] is True
+    assert result["repo"] == "octo/docs_uncertified"
+    assert result["source_repo"] == "octo/docs"
+    assert result["sha_certified"] is False
+    assert "repo_at_sha" not in result
+    assert "source_repo_at_sha" not in result
+
+    store = DocStore(base_path=str(tmp_path))
+    stored = store.load_index("octo", "docs_uncertified")
+    assert stored is not None
+    assert stored.source_repo == "octo/docs"
+    assert stored.sha_certified is False
+
+    strict = search_sections(
+        repo=f"octo/docs_uncertified@{'3' * 40}",
+        query="uncertified",
+        storage_path=str(tmp_path),
+    )
+    assert strict["error"] == f"Repo not found: octo/docs_uncertified@{'3' * 40}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_name", ["foo@bar", "foo/bar", "foo\\bar", "", "..", 123, ["x"], {"x": "y"}])
 async def test_index_repo_custom_name_rejects_unsafe_storage_names(tmp_path, monkeypatch, bad_name):
     mod = importlib.import_module("jdocmunch_mcp.tools.index_repo")
 
@@ -357,3 +515,33 @@ async def test_doc_index_repo_schema_exposes_name_override():
     assert "name" in tool.inputSchema["properties"]
     assert tool.inputSchema["properties"]["name"]["type"] == "string"
     assert tool.inputSchema["required"] == ["url"]
+
+
+@pytest.mark.asyncio
+async def test_doc_index_repo_call_tool_passes_name_override(monkeypatch):
+    srv = importlib.import_module("jdocmunch_mcp.server")
+    seen = {}
+
+    async def fake_index_repo(**kwargs):
+        seen.update(kwargs)
+        return {"success": True}
+
+    monkeypatch.setattr(srv, "index_repo", fake_index_repo)
+
+    response = await srv.call_tool(
+        "doc_index_repo",
+        {
+            "url": "octo/docs",
+            "name": "docs_v1",
+            "use_ai_summaries": False,
+            "use_embeddings": False,
+            "incremental": False,
+        },
+    )
+
+    assert json.loads(response[0].text)["success"] is True
+    assert seen["url"] == "octo/docs"
+    assert seen["name"] == "docs_v1"
+    assert seen["use_ai_summaries"] is False
+    assert seen["use_embeddings"] is False
+    assert seen["incremental"] is False

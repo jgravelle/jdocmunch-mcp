@@ -234,6 +234,14 @@ async def index_repo(
                     and not existing.source_dirty
                 ):
                     updated = existing
+                    if existing.source_repo != source_repo_id:
+                        updated = store.incremental_save(
+                            owner=owner, name=index_name,
+                            changed_files=[], new_files=[], deleted_files=[],
+                            new_sections=[], raw_files={}, doc_types={},
+                            head_sha=current_sha, source_dirty=False, sha_certified=True,
+                            source_repo=source_repo_id,
+                        ) or existing
                     latency_ms = int((time.perf_counter() - t0) * 1000)
                     result = {
                         "success": True,

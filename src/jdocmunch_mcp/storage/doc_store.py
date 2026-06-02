@@ -99,8 +99,7 @@ class DocIndex:
     # VuePress grouped-dict sidebar). Empty string when unknown — tools must
     # tolerate the missing case.
     source_root: str = ""
-    # Original upstream repository for GitHub indexes when storage name differs.
-    # Empty for legacy/local indexes.
+    # Original upstream repository for GitHub indexes. Empty for legacy/local indexes.
     source_repo: str = ""
 
     def __post_init__(self) -> None:
