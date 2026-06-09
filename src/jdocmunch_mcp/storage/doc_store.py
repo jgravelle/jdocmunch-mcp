@@ -5,11 +5,18 @@ import json
 import os
 import re
 import shutil
+import functools
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+try:
+    import fcntl  # POSIX advisory file locks (cross-process); absent on Windows
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 from ..parser.sections import Section
 from ..embeddings import embed_query, cosine_similarity
@@ -17,6 +24,33 @@ from ..embeddings import embed_query, cosine_similarity
 INDEX_VERSION = 3
 COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _UNSET = object()
+
+
+def _with_index_lock(method):
+    """Serialize same-repo index writes across processes (see DocStore._index_write_lock).
+
+    jdocmunch rewrites the whole ``<name>.json`` on every save. Without a
+    cross-process lock, two concurrent writers for the same repo (e.g. a
+    scheduled reindex and a per-edit hook) can interleave and ``os.replace``
+    then installs a corrupt/partial index, or silently drops one writer's
+    update (last-replace-wins). This decorator holds an exclusive advisory lock
+    for the whole method -- including the read in ``incremental_save`` -- so the
+    read-modify-write is atomic between processes.
+
+    Note: the lock is non-reentrant (``flock`` is per-fd), so a decorated method
+    must not call ``save_index``/``incremental_save`` for the *same* repo while
+    already holding the lock -- that would self-deadlock. Today neither writer
+    calls the other.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        owner = kwargs.get("owner", args[0] if len(args) >= 1 else None)
+        name = kwargs.get("name", args[1] if len(args) >= 2 else None)
+        with self._index_write_lock(owner, name):
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 # Module-level LRU cache: {(str(index_path), mtime_ns): DocIndex}
 # Keyed by path + mtime so the entry auto-invalidates whenever the file changes.
@@ -412,6 +446,34 @@ class DocStore:
         n = self._safe_repo_component(name, "name")
         return self.base_path / o / n
 
+    @contextmanager
+    def _index_write_lock(self, owner, name):
+        """Exclusive cross-process lock guarding writes to one repo's index.
+
+        Backed by an advisory ``flock`` on a per-repo ``<name>.json.lock`` file.
+        No-op when ``fcntl`` is unavailable (Windows) or owner/name are missing;
+        the per-PID temp name in the writers still prevents structural
+        corruption between processes in that case.
+        """
+        if fcntl is None or not owner or not name:
+            yield
+            return
+        try:
+            lock_path = self._index_path(owner, name).with_suffix(".json.lock")
+        except ValueError:
+            yield
+            return
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
     def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
         try:
             base = content_dir.resolve()
@@ -422,6 +484,7 @@ class DocStore:
         except (OSError, ValueError):
             return None
 
+    @_with_index_lock
     def save_index(
         self,
         owner: str,
@@ -467,7 +530,7 @@ class DocStore:
 
         index_path = self._index_path(owner, name)
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = index_path.with_suffix(".json.tmp")
+        tmp_path = index_path.with_name(f"{index_path.name}.{os.getpid()}.tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._index_to_dict(index), f, indent=2)
         tmp_path.replace(index_path)
@@ -579,6 +642,7 @@ class DocStore:
 
         return changed_files, new_files, deleted_files
 
+    @_with_index_lock
     def incremental_save(
         self,
         owner: str,
@@ -687,7 +751,7 @@ class DocStore:
 
         # Save atomically
         index_path = self._index_path(owner, name)
-        tmp_path = index_path.with_suffix(".json.tmp")
+        tmp_path = index_path.with_name(f"{index_path.name}.{os.getpid()}.tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._index_to_dict(updated), f, indent=2)
         tmp_path.replace(index_path)
@@ -800,6 +864,13 @@ class DocStore:
         if content_dir.exists():
             shutil.rmtree(content_dir)
             deleted = True
+        # Best-effort cleanup of the per-repo write-lock file left by _index_write_lock.
+        lock_path = index_path.with_suffix(".json.lock")
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
         return deleted
 
     def _index_to_dict(self, index: DocIndex) -> dict:
