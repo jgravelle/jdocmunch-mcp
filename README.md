@@ -2,6 +2,8 @@
 
 ## You're Wasting Tokens... That Stops NOW
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.jgravelle%2Fjdocmunch-mcp.svg)](https://mcptoplist.com/server/io.github.jgravelle%2Fjdocmunch-mcp)
+
 Most AI agents still explore documentation the expensive way:
 
 open file → skim hundreds of irrelevant paragraphs → open another file → repeat
