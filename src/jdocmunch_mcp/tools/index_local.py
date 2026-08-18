@@ -26,7 +26,7 @@ from ..security import (
     DEFAULT_MAX_FILE_SIZE,
 )
 from ..storage import DocStore
-from ..storage.doc_store import normalize_commit_sha
+from ..storage.doc_store import INDEX_OWNED_SIDECAR_SUFFIXES, normalize_commit_sha
 from ..summarizer import summarize_sections
 from ..embeddings import embed_sections, get_provider_name, should_embed
 from ._embedding_coverage import attach_embedding_coverage as _attach_embedding_coverage
@@ -144,10 +144,9 @@ def _leftover_artifacts(store, owner: str, name: str) -> list:
         index_path,
         index_path.with_name(f"{index_path.stem}.summary.json"),
     ]
-    for suffix in (
-        ".embeddings.jsonl", ".terms.json", ".related.json",
-        ".boilerplate.json", ".duplicates.json",
-    ):
+    for suffix in INDEX_OWNED_SIDECAR_SUFFIXES:
+        if suffix == ".summary.json":
+            continue  # already listed above, off index_path.stem
         candidates.append(index_path.with_name(f"{name}{suffix}"))
     try:
         candidates.append(store._content_dir(owner, name))

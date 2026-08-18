@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.134.1 |
+**Version:** 1.135.0 |
 **Tests:** `PYTHONPATH=src pytest tests/ -q`
 
 ⚠ **`tests/` is shipped inside the sdist, so anything dropped there is
@@ -37,6 +37,60 @@ against the API that exists.
 a count into this file. **The `coordinated-retirement` hold is OVER** — #92
 merged as `3037428`, branch deleted from the workflow. Nothing is held; ship
 from `master`.
+
+## v1.135.0 — #121: the filter keys on the SUFFIX, because the orphan case is the worse one
+
+`list_repos` globbed `*/*.json`, excluded only `_` and `.summary.json`, and so
+opened and json-parsed every `.terms`/`.related`/`.boilerplate`/`.duplicates`
+sidecar in the store before discarding it for lacking primary-index fields.
+@rknighton measured it on a controlled 75-index store: **2,044.2 ms → 3,459.5 ms
+median, non-overlapping ranges, 300 extra parses.** Documented first-call hot
+path, also hit by the PreCompact hook.
+
+⚠⚠ **Keying on "does the primary exist" would have fixed the LIVE case and left
+the worse one untouched.** A store that lost an index to a pre-1.108.0
+`delete_index` still carries all four sidecars; theirs held **1,093 such files,
+2.0 GB, opened on every call to return nothing** — `.related.json` was 98.3% of
+those bytes and ONE file was 1.24 GB. Their repro ships both arrangements
+precisely so the fix cannot be shaped to the easy half.
+
+⚠ **Row counts cannot test this.** The primary-absent case returns zero repos
+pre- and post-fix. The tests patch `json.load` and assert on what was OPENED.
+
+⚠⚠ **The tuple was hand-copied to three places and the copy that mattered was
+NEVER WRITTEN — that absence IS #121.** `delete_index` had one,
+`_leftover_artifacts` had another, `list_repos` had none. Now one
+`INDEX_OWNED_SIDECAR_SUFFIXES` in `storage/doc_store.py`, read by all three,
+with a test that derives each suffix from the module that WRITES it (each
+`_path`/`_terms_path` called with a sentinel name) and fails if one is missing.
+**Same shape as jdoc#116's `_index_to_dict` allow-list**: a convention held in
+three copies is a convention with a hole in it.
+
+⚠ **Repo names may contain dots** — `is_safe_path_component` allows
+`[A-Za-z0-9._-]` — so a repo named `api.related` writes its PRIMARY monolith to
+`api.related.json`, and a bare suffix test would have silently unlisted it. A
+sidecar-looking candidate is readmitted when it has its own `.summary.json`
+(every index saved since jdoc#77 writes one; nothing writes a summary beside a
+real sidecar). One `stat`, zero parses. ⚠ A **pre-jdoc#77** index whose name
+ends in a sidecar suffix has no summary to vouch for it and is not listed —
+recorded, not solved: distinguishing it from an orphan requires opening the
+file, which is the cost being removed.
+
+⚠ One test asserts each suffix **ALONE**, no siblings. A filter reasoning from
+the sidecar SET (`.related` is a sidecar because `.terms` sits beside it) passes
+every other test here and then parses the 1.24 GB file once its peers are
+cleaned up by hand.
+
+Local A/B on a **synthetic** 40-index store (23.1 MB, 22.8 MB of it
+`.related.json`) — the reporter's fixture is private and was NOT re-run:
+json loads **200 → 40**, median **188.9 ms → 8.0 ms** over 5 runs. ⚠ The ratio
+is a property of that store's sidecar bytes; the LOAD COUNTS are the durable
+claim, the milliseconds are an illustration.
+
+Tests `tests/test_jdoc_121_list_repos_sidecars.py` (13). ⚠ The file cannot
+IMPORT pre-fix, so non-vacuity used a behaviour-only subset: **9 fail / 1 pass**
+(the `_`-prefix control). Suite **2582 / 6**; `ruff check src/` clean. No tool,
+schema or INDEX_VERSION change.
 
 ## v1.134.1 — ⚠⚠ the build reads the WORKING TREE, and a shared checkout is not release-safe
 

@@ -41,6 +41,38 @@ RECORD_LOCK_WAIT_SECONDS = 1.0
 COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _UNSET = object()
 
+# Every file suffix an index owns beside its `<name>.json` monolith. The
+# canonical list: `delete_index` removes these, `_leftover_artifacts` reports
+# them, and `list_repos` must never mistake one for a primary index.
+#
+# ⚠ jdoc#121: this existed as three hand-copied tuples and the copy that was
+# MISSING is what the issue reports — `list_repos` globbed `*/*.json` and
+# excluded only `_`-prefixed files and `.summary.json`, so it opened and
+# json-parsed every `.terms/.related/.boilerplate/.duplicates` sidecar in the
+# store on a documented first-call hot path, then discarded each one for
+# lacking primary-index fields. Measured on a 75-index store: 2,044 ms ->
+# 3,460 ms median, 300 extra parses. `.related.json` is the expensive member
+# (one measured file was 1.2 GB), and the parsed set is bounded by sidecar
+# bytes, not by live corpus size.
+#
+# ⚠ `tests/test_jdoc_121_list_repos_sidecars.py` derives each suffix from the
+# module that WRITES it and fails if one is missing here, so a fifth sidecar
+# cannot be added without joining this list.
+INDEX_OWNED_SIDECAR_SUFFIXES = (
+    ".summary.json",
+    ".embeddings.jsonl",
+    ".terms.json",
+    ".related.json",
+    ".boilerplate.json",
+    ".duplicates.json",
+)
+
+# The subset that `list_repos`'s `*/*.json` glob can actually match, so the
+# candidate filter never stats for a suffix the glob cannot produce.
+_SIDECAR_SUFFIXES_MATCHING_JSON_GLOB = tuple(
+    s for s in INDEX_OWNED_SIDECAR_SUFFIXES if s.endswith(".json")
+)
+
 # Authoritative storage outcomes for delete_index. The semantic keys are
 # internal; the values are the stable public reason codes emitted by storage
 # and interpreted by the public tool.
@@ -1664,6 +1696,42 @@ class DocStore:
                 row["source_repo_at_sha"] = source_repo_at_sha
         return row
 
+    def _is_owned_sidecar(self, path: Path) -> bool:
+        """Whether ``path`` is an index-owned sidecar rather than a monolith.
+
+        Decided by suffix and one ``exists()`` -- never by opening the file,
+        which is the whole point of jdoc#121.
+
+        ⚠ The suffix alone is not quite sufficient, because repo names may
+        contain dots (``is_safe_path_component`` allows ``[A-Za-z0-9._-]``).
+        A repo genuinely named ``api.related`` writes its PRIMARY monolith to
+        ``api.related.json``, and a bare suffix test would hide it -- turning a
+        performance fix into a repo that stopped being listed. So a candidate
+        that looks like a sidecar is readmitted when it has its own summary
+        sidecar (``api.related.summary.json``): every index saved since jdoc#77
+        writes one, and nothing anywhere writes a ``.summary.json`` beside a
+        real sidecar. That readmission costs one stat and no parse.
+
+        ⚠ A pre-jdoc#77 legacy index whose name ends in one of these suffixes
+        has no summary to vouch for it and is not listed. Recorded rather than
+        solved: the only way to tell it from an orphaned sidecar is to parse
+        the file, which is the cost being removed.
+        """
+        name = path.name
+        for suffix in _SIDECAR_SUFFIXES_MATCHING_JSON_GLOB:
+            if not name.endswith(suffix):
+                continue
+            if len(name) == len(suffix):
+                # A file literally named `.related.json` owns no index and is
+                # left to the old behaviour rather than silently dropped.
+                continue
+            if suffix != ".summary.json" and path.with_name(
+                f"{path.stem}.summary.json"
+            ).exists():
+                return False
+            return True
+        return False
+
     def list_repos(self) -> list:
         """List all indexed doc sets.
 
@@ -1672,10 +1740,19 @@ class DocStore:
         (a documented first-call hot path, also hit by the PreCompact snapshot
         hook). Falls back to the full parse for legacy indexes written before
         the sidecar existed; a per-index parse failure only drops that one row.
+
+        jdoc#121: candidates are filtered on the SIDECAR SUFFIX, not on whether
+        a matching primary exists beside them. Keying on the primary would fix
+        the live case and leave the other one alone -- a store that lost an
+        index to a pre-1.108.0 ``delete_index`` still carries its four
+        sidecars, and those were being parsed in full to return no row at all.
+        The reporter measured 1,093 such files, 2.0 GB, opened on every call.
         """
         repos = []
         for index_file in self.base_path.glob("*/*.json"):
-            if index_file.name.startswith("_") or index_file.name.endswith(".summary.json"):
+            if index_file.name.startswith("_"):
+                continue
+            if self._is_owned_sidecar(index_file):
                 continue
             summary_path = index_file.with_name(f"{index_file.stem}.summary.json")
             if summary_path.exists():
@@ -2059,13 +2136,9 @@ class DocStore:
         # the index — embeddings, glossary terms, related graph, boilerplate,
         # duplicates. Leaving any behind lets a retired index shed ghost files
         # into the owner directory (and a future same-name index inherit them).
-        for suffix in (
-            ".embeddings.jsonl",
-            ".terms.json",
-            ".related.json",
-            ".boilerplate.json",
-            ".duplicates.json",
-        ):
+        for suffix in INDEX_OWNED_SIDECAR_SUFFIXES:
+            if suffix == ".summary.json":
+                continue  # already removed above, with its own error handling
             sidecar = index_path.with_name(f"{name}{suffix}")
             if sidecar.exists():
                 try:
