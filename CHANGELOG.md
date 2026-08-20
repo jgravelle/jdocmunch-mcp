@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### The aside came out of the LICENSE
+
+`He's kinda full of himself.` sat inside condition 2, in the middle of the
+derivation-and-attribution obligation. It stays in jCodeMunch's README, where it
+reads as the author's voice; a licence is the document a customer's counsel reads
+before allowlisting, and a joke inside an operative clause makes a reader stop
+and work out whether it is operative.
+
+⚠ **Editorial, and deliberately so.** It grants and removes nothing, so the
+licence version and the identifier are untouched — a downstream allowlist on
+this identifier is not churned. jcodemunch-mcp #521 pins that distinction with a
+digest; these files state no licence version yet, so the same routing is a
+convention here rather than a check.
+
 ### PyPI published no license identifier at all (#122, @marcelruhf)
 
 `pyproject.toml` had no `license` key, so PyPI left `info.license` and
