@@ -1133,6 +1133,60 @@ stall a release, careful review becomes expensive to accept, which is backwards.
 **3. A contributor's PR is never the only path.** Timebox and keep our own path
 warm.
 
+**3a. NO TIMEBOX WE OFFER RUNS LONGER THAN 24 HOURS — absolute, no exceptions**
+(jjg, 2026-08-14; closed to exceptions 2026-08-20). It covers every shape:
+signing the CLA, opening a PR already written, and taking an issue to implement.
+
+⚠⚠ **The window is only fair BECAUSE the default action preserves credit.** At
+expiry we implement the fix ourselves and credit them in the CHANGELOG, the
+release notes and the close comment. So the 24 hours decide whose COMMIT it is,
+never whether they are credited and never whether the fix ships. **Quote the
+default in the same comment as the deadline** — a clock with an unstated
+consequence reads as a threat, and it is not one.
+
+⚠⚠ **The failure mode has a name: a CLA hostage negotiation.** jcodemunch-mcp
+#443 ran EIGHT DAYS on a 2026-08-26 window — a real security fix, reviewed and
+green, held behind a 30-second form, while SEVEN of our own merges conflicted its
+branch. **Not one of those days bought anything.** A window over 24 hours
+purchases exactly one thing, the chance the contributor's commit is theirs, and
+pays for it in users' exposure to an unfixed defect.
+
+⚠ **An extension the contributor ASKS FOR is not the same as a default we hand
+out**, and CONTRIBUTING.md invites the ask by name. Hold it when they ask; the
+clock exists to stop work going quiet, not to catch anyone out.
+
+⚠ **Do not shorten a timebox already posted.** A public promise outlives the
+policy that produced it. State the new window on new PRs.
+
+**3b. A MERGEABLE contributor PR merges BEFORE any changelog-touching work of
+our own.** Every entry we add occupies the same `[Unreleased]` block a
+contributor's entry occupies, so each of our merges conflicts their branch — and
+**a CONFLICTING fork PR has no `refs/pull/N/merge` and therefore gets NO CI AT
+ALL.** Their branch goes dark for a reason unrelated to their change.
+
+```bash
+GITHUB_TOKEN="" gh pr list --state open --json number,author,mergeable,mergeStateStatus   --jq '.[] | select(.author.login != "jgravelle") | "#\(.number) \(.author.login) \(.mergeable) \(.mergeStateStatus)"'
+```
+
+⚠ **The boundary:** a BLOCKED PR cannot go first. Then we ship anyway (policy 2)
+and **we own the resolution** — push the merge to their branch and say on the
+thread that the conflict was ours.
+
+⚠⚠ **A FORK PR SHOWING ONLY `license/cla` HAS NOT BEEN TESTED — IT HAS BEEN
+SILENTLY HELD**, and `gh pr checks` lists only checks that RAN, so the hold is
+invisible from the place you would look. Measured on jdoc #122 and jdata #4 on
+2026-08-20: four and two held runs respectively.
+
+```bash
+GITHUB_TOKEN="" gh api "repos/jgravelle/<repo>/actions/runs?status=action_required&per_page=30"   --jq '.workflow_runs[] | "\(.id)|\(.name)|\(.head_branch)"'
+GITHUB_TOKEN="" gh api --method POST "repos/jgravelle/<repo>/actions/runs/<id>/approve"
+```
+
+⚠ **Both repos' `fork-pr-contributor-approval` was relaxed to
+`first_time_contributors_new_to_github` on 2026-08-20**, matching jcm since
+2026-08-13. Until then every first-time fork contributor's runs were created
+`action_required` and never executed.
+
 ⚠⚠ **Do NOT answer "an issue is stuck" with aggregate stats.** jdoc's median
 time-to-close is 1 day (60 issues, 45 within a day, 1 ever past a week). True,
 and NOT a response: the cost of a blocked issue is CONCENTRATED, not
