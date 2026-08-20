@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### PyPI published no license identifier at all (#122, @marcelruhf)
+
+`pyproject.toml` had no `license` key, so PyPI left `info.license` and
+`info.license_expression` empty and a commercial user could not allowlist us
+by identifier. Packaging metadata is PEP 639 now:
+`license = "LicenseRef-jDocMunch-Dual-Use"` plus
+`license-files = ["LICENSE"]`.
+
+The LICENSE file is unchanged and still ships.
+
+⚠ **PyPI metadata is immutable per version, so this starts at the next release.**
+Every version up to 1.135.0 keeps empty license fields.
+
+⚠⚠ **The report named one surface and the licence is declared on three.**
+`.claude-plugin/plugin.json` and the mcpb manifest both said
+`LicenseRef-Dual-Use` — no product prefix — so an allowlist keyed on the
+identifier still needed two entries. That is the reported defect one surface
+over, and fixing only what was reported would have left it. Both now name the
+same identifier, and the mcpb generator DERIVES it from `pyproject.toml` rather
+than carrying its own copy, which is how the two spellings drifted apart to
+begin with.
+
+⚠ **LICENSE has no Version line, so the identifier has no version suffix.**
+jcodemunch-mcp #518 pins the suffix to LICENSE's `Version X.Y` so 1.2 cannot
+ship under 1.1's identifier. The same ratchet is here: if a Version line
+appears without a matching suffix (or the reverse), the build fails.
+`tests/test_license_identifier_agreement.py` is that pin.
+
 ## [1.135.0] - 2026-08-18 - list_repos stops parsing the files it throws away
 
 `list_repos` globbed `*/*.json` and excluded only `_`-prefixed files and

@@ -58,7 +58,7 @@ def build_manifest():
         "homepage": f"https://github.com/jgravelle/{name}",
         "documentation": f"https://github.com/jgravelle/{name}#readme",
         "support": f"https://github.com/jgravelle/{name}/issues",
-        "license": "LicenseRef-Dual-Use",
+        "license": pyproject_field("license"),
         "server": {
             "type": "python",
             "entry_point": "server/main.py",
