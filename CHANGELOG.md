@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.135.1] - 2026-08-20 - The licence became something you can point at
+
+A licensing release, no behaviour change. PyPI published neither `info.license`
+nor `info.license_expression` for this package, so an organisation with a
+commercial licence had nothing to allowlist — not a wrong identifier, no
+identifier. It has one from this version.
+
 ### The aside came out of the LICENSE
 
 `He's kinda full of himself.` sat inside condition 2, in the middle of the
@@ -24,10 +31,10 @@ by identifier. Packaging metadata is PEP 639 now:
 `license = "LicenseRef-jDocMunch-Dual-Use"` plus
 `license-files = ["LICENSE"]`.
 
-The LICENSE file is unchanged and still ships.
+The LICENSE file still ships, at `dist-info/licenses/LICENSE` in the wheel.
 
-⚠ **PyPI metadata is immutable per version, so this starts at the next release.**
-Every version up to 1.135.0 keeps empty license fields.
+⚠ **PyPI metadata is immutable per version, so 1.135.1 is where this starts.**
+Every version up to and including 1.135.0 keeps empty licence fields, permanently.
 
 ⚠⚠ **The report named one surface and the licence is declared on three.**
 `.claude-plugin/plugin.json` and the mcpb manifest both said

@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.135.0 |
+**Version:** 1.135.1 |
 **Tests:** `PYTHONPATH=src pytest tests/ -q`
 
 ⚠ **`tests/` is shipped inside the sdist, so anything dropped there is
