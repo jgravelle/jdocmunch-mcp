@@ -1172,6 +1172,20 @@ GITHUB_TOKEN="" gh pr list --state open --json number,author,mergeable,mergeStat
 and **we own the resolution** — push the merge to their branch and say on the
 thread that the conflict was ours.
 
+⚠⚠ **`license/cla` IS A REQUIRED STATUS CHECK ON `master` (2026-08-21).** Until
+that date this repo was PROTECTED BUT REQUIRED NOTHING, so the CLA was
+read and never enforced — an open PR read `MERGEABLE/UNSTABLE` and one distracted
+click could have merged unsigned code. jcm has had this since 2026-08-17 (policy
+3d); **a setting fixed in one repo of a suite is fixed in one repo.** All three
+now read `contexts ["license/cla"]`, `strict false`, `enforce_admins false`,
+force-push and deletion off.
+⚠ `enforce_admins: false` is deliberate — it is what lets a merge be pushed to a
+contributor's fork. `strict: false` avoids forcing a rebase after every release.
+⚠⚠ **This composes with the status-erasure hazard below and now FAILS CLOSED.**
+Our push to a fork wipes `license/cla` from the new head, and with the check
+required that reads as `BLOCKED` until the bot re-posts. Correct, and it will
+look like a new problem the first time.
+
 ⚠⚠ **A FORK PR SHOWING ONLY `license/cla` HAS NOT BEEN TESTED — IT HAS BEEN
 SILENTLY HELD**, and `gh pr checks` lists only checks that RAN, so the hold is
 invisible from the place you would look. Measured on jdoc #122 and jdata #4 on
