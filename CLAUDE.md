@@ -1560,6 +1560,27 @@ Versions 1.115.0 and earlier: see `docs/CLAUDE-history.md` (moved out of this fi
 2026-07-25). `CHANGELOG.md` covers most of them, but 1.67.0-1.92.0 and 1.96.0 exist
 ONLY in the history file.
 
+⚠⚠ **The rotation now has a GATE: `tests/test_claude_md_size.py`.** This file is
+budgeted at 130,000 chars against the 150,000 the harness will load, and today it
+is ~101,600 with 27 embedded release sections making up 96% of it. When the gate
+fires, move the OLDEST `## vX.Y.Z` sections into `docs/CLAUDE-history.md`.
+**Rotate, never delete** — every version here also exists in `CHANGELOG.md`, but
+four sections carry analysis the CHANGELOG does not.
+
+⚠⚠ **Rotate into THAT path, not a new one.** The replay self-fixture indexes
+`repo_path: "."`, so a large markdown file at a new path joins the retrieval
+corpus and outranks the goldens — measured once at nDCG 0.906 against a 0.95 gate
+with recall still 1.0. `CLAUDE.md` and `docs/CLAUDE-history.md` are both in the
+fixture's `extra_ignore_patterns`, and the gate asserts it for every whole-repo
+fixture. ⚠ jcodemunch-mcp rotates into a ROOT-LEVEL `ISSUE-HISTORY.md`; copying
+that choice here is the specific mistake the gate exists to stop.
+
+⚠ **The sibling repo is why this exists.** jcm's `CLAUDE.md` hit 200,543 chars
+and stopped loading on 2026-08-21 while its size practice was being followed —
+the practice named one section and the growth was everywhere else. **A rule that
+names one section licenses every other section to grow**, and a budget stated
+only in prose is not a budget.
+
 ## Purpose
 Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp (which owns code symbols). Do NOT add code/docstring parsing here.
 
