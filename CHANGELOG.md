@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+### Added - the one string that survives tool deferral
+
+The MCP `initialize` response now carries an `instructions` string. It did not
+before: the transport called `create_initialization_options()` bare, so the
+field went out empty and nothing anywhere said so.
+
+The cost is invisible in a normal session and concentrated in a deferred one. A
+host over its schema budget sends tool NAMES and withholds the JSONSchemas until
+a `ToolSearch`-style lookup fetches them. That is 64 bare strings here,
+with none of the descriptions. The spec delivers `instructions` on a separate
+track from the tool list, so it arrives whole - in a plain MCP client with no
+hooks and no skill listing it is the entire steering budget this server gets.
+
+It does two things, in this order: load the working set in ONE lookup, a round
+trip for the session instead of two calls per use, then a decision rule per tool
+rather than a feature summary. 909 characters against a 1,000 cap; nothing
+proves a longer string survives un-truncated.
+
+### Fixed - `serverInfo` named the SDK's version, not ours
+
+`Server("jdocmunch-mcp")` was constructed with no `version=`, so the SDK filled the
+field with its own package version. Every host that displays a server version
+displayed the mcp package number instead of 1.135.1.
+
+⚠⚠ **Green tests do not prove the wire carries a real number.**
+`__version__` falls back to `"unknown"` when distribution metadata is absent,
+which is every `PYTHONPATH=src` run. That fallback is deliberate and older than
+this fix: `"unknown"` is an honest could-not-establish, where the SDK's number
+was a confident answer about a different package.
+
+### The tests
+
+`tests/test_mcp_instructions.py` binds the prose to the catalog, because prose
+is what rots. It fails when the string names a tool the server does not
+dispatch, when the `select:` query and the bullet list disagree about what to
+load, and - parsing the dispatcher's own AST - when `server.run()` goes back to
+a bare `create_initialization_options()`.
+
+⚠⚠ **A handshake that sends nothing raises no error and serves every
+request normally, so the only witness is a test.** Each of the three guards was
+verified by reintroducing the defect it names and watching it fail, not only by
+watching it pass.
+
+⚠ Ported from jcodemunch-mcp v1.108.292. **A setting fixed in one repo of
+a suite is fixed in one repo** - both defects were present here, unchanged,
+and neither had a symptom anyone could have reported.
+
 ## [1.135.1] - 2026-08-20 - The licence became something you can point at
 
 A licensing release, no behaviour change. PyPI published neither `info.license`

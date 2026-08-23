@@ -3,6 +3,8 @@
 **Version:** 1.135.1 |
 **Tests:** `PYTHONPATH=src pytest tests/ -q`
 
+- **Unreleased - the one string that survives tool deferral.** The MCP `initialize` response now carries an `instructions` string; it did not before, because the transport called `create_initialization_options()` bare and the field went out empty. ⚠⚠ **Invisible in a normal session, CONCENTRATED in a deferred one**: a host over its schema budget ships tool NAMES and withholds the JSONSchemas, so an agent sees 64 bare strings and none of the descriptions. The spec delivers `instructions` on a SEPARATE TRACK from the tool list, so it arrives whole - in a plain MCP client it is the entire steering budget this server gets. 909 chars against a 1,000 cap. ⚠ Also sets `Server(..., version=__version__)`: without it the SDK reports ITS OWN version in `serverInfo`. ⚠ `__version__` is `"unknown"` under `PYTHONPATH=src`, so a green test does NOT prove the wire carries a real number. ⚠⚠ **Ported from jcodemunch-mcp v1.108.292 - both defects were present here unchanged, and neither had a symptom anyone could report.** ⚠⚠ **The port also reproduced a NameError in BOTH repos** (`logger` through a module-level name neither server.py defines) and **only jdoc caught it** - jdata's suite was GREEN with the identical bug, because it had no F821 gate. jdoc's `test_lint_gate_regressions.py` did its job. **A setting fixed in one repo of a suite is fixed in one repo, and that applies to the GATES as much as the code.** `tests/test_mcp_instructions.py` binds the prose to the catalog; all three guards were verified by reintroducing the defect each names.
+
 ⚠ **`tests/` is shipped inside the sdist, so anything dropped there is
 distributed.** `tests/infographic.png` — a 5.9 MB promotional image, referenced
 by nothing — sat there from the initial commit and was **87% of the whole
@@ -37,6 +39,52 @@ against the API that exists.
 a count into this file. **The `coordinated-retirement` hold is OVER** — #92
 merged as `3037428`, branch deleted from the workflow. Nothing is held; ship
 from `master`.
+
+## Standing lessons (suite-wide)
+
+Drawn from jcodemunch-mcp 1.108.291 (2026-08-22) and recorded here because each
+one is about how we WORK, not about that repo's code. ⚠ **The byte-mass defect itself was CHECKED HERE and is ABSENT** (2026-08-22),
+so do not re-run the audit: `get_document_outline` / `get_toc` / `get_toc_tree`
+sum `content` over `index.sections`, which LOOKS like the jcm defect but is not.
+`markdown_parser._finalize_section` slices each section from its own heading to
+the NEXT heading of any level, so sections PARTITION the document instead of
+nesting. Measured on this repo's own README: file 15,967 bytes, sum of 19
+sections 15,967 — ratio exactly **1.0000**. ⚠⚠ **It is clean for a REASON, not
+by luck, and the reason is load-bearing**: if section bodies ever become
+descendant-inclusive, every one of those sums silently starts double-counting.
+
+- **A competitor's fix list is a free defect probe.** A rival shipped
+  `fix(gini): measure a file's lines as its own span, not the sum of every node`
+  and named the defect precisely enough to check ours in one query — jcm's
+  byte-concentration metric summed nested symbol spans and read 2.85x the real
+  size of the files it described. Read competitors' `fix(...)` TITLES against
+  whatever we built the same way; it is minutes, and it finds what our own tests
+  were written not to see.
+- **A ratchet can pass against the defect it names.** The guard written for that
+  fix used a depth-limited regex and walked straight past
+  `sum(int(s.get("byte_length", 0) or 0) for ...)`, two parens deep. **A green
+  ratchet and an absent ratchet look identical**, because the tree is clean when
+  you write it. Run every text-scanning guard against the defect PUT BACK, and
+  add a positive test pinning a correct shape it must not flag — otherwise the
+  ratchet becomes standing pressure to "fix" working code.
+- **A defect is not evidence against the number it did not produce.** The same
+  release nearly published a claim that the correction put a basis change behind
+  our public savings figure. It did not: the number quoted was one seat's local
+  meter, the site publishes a separate opt-in aggregate, and the tools feeding it
+  were already correct. **Trace the path from a defect to the SPECIFIC figure
+  before implicating it**, and never net coverage-conservatism (who reports)
+  against a per-call arithmetic error (one call's maths) — different axes,
+  opposite directions. If the apportionment cannot be computed, the honest output
+  is "not computable" plus the bound, never a restated number. **Not restating is
+  the conservative action, not the convenient one.**
+- **A metric that credits us is the one direction a defect must never sit.** When
+  the same shape turned up in jcm's token-savings baseline, the correction
+  LOWERED our own reported numbers and shipped in the same release rather than
+  as follow-up work. Where history could not be recomputed it was disclosed
+  (`lifetime_unattributed`, a basis generation) rather than quietly carried or
+  quietly rewritten — **a recomputed history is a guess wearing a measurement's
+  clothes.**
+
 
 ## v1.135.0 — #121: the filter keys on the SUFFIX, because the orphan case is the worse one
 
