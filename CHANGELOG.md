@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.136.0] - 2026-08-23 - The one string that survives tool deferral
+
 ### Added - the one string that survives tool deferral
 
 The MCP `initialize` response now carries an `instructions` string. It did not
