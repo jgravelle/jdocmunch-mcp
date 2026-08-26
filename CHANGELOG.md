@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.136.1] - 2026-08-26 - Unverifiable is not verified
+
 ### Fixed - `verify_index` counted a section it could not verify as verified
 
 The hash comparison read:
