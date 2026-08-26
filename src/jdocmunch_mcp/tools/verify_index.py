@@ -49,6 +49,8 @@ Reasons for ``skipped`` (jdoc#33 — unverifiable by design, distinct from
 corruption; e.g. the structured OpenAPI parser persists every section with
 ``byte_start=0, byte_end=0``):
   - "empty_byte_range" (byte_end <= byte_start)
+  - "no_stored_hash" (section has a byte range but no recorded content_hash,
+    so there is nothing to compare against — unverifiable, NOT clean)
 
 Invariant: clean_count + drift_count + missing_count + error_count +
 skipped_count == section_count, so every section is accounted for.
@@ -158,6 +160,28 @@ def verify_index(
             )
             continue
 
+        if not expected_hash:
+            # ⚠⚠ UNVERIFIABLE IS NOT VERIFIED. There is nothing to compare
+            # against, so this section cannot be certified either way — and
+            # the comparison below treats a falsy `expected_hash` as a pass,
+            # which would count it CLEAN. That is the whole failure mode this
+            # tool exists to prevent, one level up: a caller gating CI on
+            # `drift_count == 0` would read "we checked it and it was fine"
+            # where the truth is "we could not check it".
+            #
+            # ⚠ LATENT, not observed in the wild, and the fix is here anyway.
+            # Every current producer routes through `compute_content_hash()`,
+            # which returns the sha256 of the empty string rather than "" —
+            # so no shipped parser emits this today. But `Section.content_hash`
+            # DEFAULTS to "" (parser/sections.py), and the text parsers assign
+            # it at the end of a loop, so one producer that returns early
+            # reintroduces it silently. A certifier must not depend on every
+            # producer remembering.
+            skipped.append(
+                {"section_id": sid, "doc_path": doc_path, "reason": "no_stored_hash"}
+            )
+            continue
+
         data = _bytes_for(doc_path)
         if data is None:
             missing.append({"section_id": sid, "doc_path": doc_path, "reason": "file_missing"})
@@ -170,7 +194,9 @@ def verify_index(
             continue
 
         actual_hash = hashlib.sha256(chunk).hexdigest()
-        if expected_hash and actual_hash != expected_hash:
+        # `expected_hash` is guaranteed non-empty here — the absent case was
+        # routed to `skipped` above rather than falling through to `clean`.
+        if actual_hash != expected_hash:
             drift.append(
                 {
                     "section_id": sid,
