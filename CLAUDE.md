@@ -987,7 +987,7 @@ incl. a whole-catalog round-trip proving no tool flags its OWN declared args),
 `test_verify_index_source_layer.py` (19, the reporter's 4-file fixture).
 
 ⚠⚠ **A SECOND blindness in the same tool, found 2026-08-25 by sweeping for jcm
-v1.108.298's defect class**: the comparison was `if expected_hash and actual !=
+v1.108.298's defect class, SHIPPED IN v1.136.1 (#125)**: the comparison was `if expected_hash and actual !=
 expected`, so a section with **no stored hash** fell to the `else` and was
 counted **CLEAN**. Unverifiable is not verified, and a caller gating on
 `drift_count == 0` reads the two identically. ⚠⚠ **The accounting invariant
