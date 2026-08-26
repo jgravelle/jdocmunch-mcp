@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Fixed - `verify_index` counted a section it could not verify as verified
+
+The hash comparison read:
+
+```python
+if expected_hash and actual_hash != expected_hash:
+    drift.append(...)
+else:
+    clean += 1
+```
+
+A section with **no stored `content_hash` has nothing to compare against**, so
+it fell to the `else` and was counted CLEAN. A caller gating CI on
+`drift_count == 0` would read "we checked it and it was fine" where the truth
+is "we could not check it" -- inside the one tool whose entire job is to
+certify integrity.
+
+⚠⚠ **The accounting invariant could not catch it.** `clean + drift + missing +
+error + skipped == section_count` still held, because the section WAS counted,
+just in the wrong bucket. A consistency check over totals is blind to a
+misfiled row.
+
+Now routed to `skipped` with reason `no_stored_hash`, beside the existing
+`empty_byte_range` -- the file already had the right home for "unverifiable by
+design" and this case simply was not sent there.
+
+⚠ **LATENT, and recorded as latent rather than sold as a live bug.** Every
+shipped producer routes through `compute_content_hash()`, which returns the
+sha256 of the empty string rather than `""`, so no parser emits this today.
+But `Section.content_hash` DEFAULTS to `""` (`parser/sections.py`) and the
+text parsers assign it at the end of a loop, so one producer that returns early
+reintroduces it with no symptom. A certifier must not depend on every producer
+remembering. `TestTheProducerIsCurrentlyClean` pins that premise: if it ever
+fails, this entry is understating the severity.
+
+⚠⚠ `tests/test_verify_index_unhashed.py` runs the **pre-fix module source** for
+its non-vacuity pass rather than simulating it. The first draft monkeypatched
+`hashlib.sha256` to return `""`, which broke every section at once and drove
+`clean_count` to 0 -- it manufactured a different defect and would have passed
+as "the guard fires" for the wrong reason.
+
+Found by sweeping jdoc and jdata for the defect class behind jcm v1.108.298
+(a check that certifies what it could not observe). jdata's `validate_index`
+was clean: it already fails on an unknown `PRAGMA integrity_check` and warns
+rather than passes when a checksum cannot be read.
+
 ## [1.136.0] - 2026-08-23 - The one string that survives tool deferral
 
 ### Added - the one string that survives tool deferral

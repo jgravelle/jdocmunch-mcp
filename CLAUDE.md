@@ -985,6 +985,22 @@ Tests: `test_gitignore_dot_directories.py` (20; **10 fail pre-fix**, 10 controls
 pass BOTH sides), `test_dedup_ceiling.py` (17), `test_unknown_arguments.py` (15,
 incl. a whole-catalog round-trip proving no tool flags its OWN declared args),
 `test_verify_index_source_layer.py` (19, the reporter's 4-file fixture).
+
+⚠⚠ **A SECOND blindness in the same tool, found 2026-08-25 by sweeping for jcm
+v1.108.298's defect class**: the comparison was `if expected_hash and actual !=
+expected`, so a section with **no stored hash** fell to the `else` and was
+counted **CLEAN**. Unverifiable is not verified, and a caller gating on
+`drift_count == 0` reads the two identically. ⚠⚠ **The accounting invariant
+`clean+drift+missing+error+skipped == section_count` still held** -- the row was
+counted, just misfiled -- so a totals check cannot see this class at all. Now
+`skipped` with reason `no_stored_hash`, beside `empty_byte_range`. ⚠ **LATENT,
+not live**: every producer goes through `compute_content_hash()` (sha256 of ""
+for an empty body, never `""`), but `Section.content_hash` DEFAULTS to `""` and
+the text parsers assign it at the END of a loop, so one early return
+reintroduces it silently. `TestTheProducerIsCurrentlyClean` pins that premise
+and fails if it ever goes live. ⚠ The non-vacuity test EXECUTES the pre-fix
+module source; simulating it by patching `hashlib.sha256` broke every section
+and passed for the wrong reason.
 Suite **2144 passed / 6 skipped / 0 failed**. No INDEX_VERSION change.
 
 ## v1.123.0 — offloadable-work annotation, OFF BY DEFAULT
