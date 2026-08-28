@@ -415,3 +415,108 @@ def test_readme_discloses_the_download():
     root = Path(__file__).resolve().parents[1]
     text = (root / "README.md").read_text(encoding="utf-8").lower()
     assert "fastembed" in text
+
+
+# ---------------------------------------------------------------------------
+# Ratchet: a test that pins one offline provider must pin the other
+# ---------------------------------------------------------------------------
+
+# Tests that stub exactly one of the two availability probes ON PURPOSE, with
+# the reason. Add an entry with its reason; never loosen the rule.
+_SINGLE_PROBE_EXEMPT = {
+    # Sets JDOCMUNCH_EMBEDDING_PROVIDER explicitly, so auto-detect's offline
+    # fallback is unreachable and the unpinned probe cannot change the result.
+    "test_incomplete_openai_compatible_env_does_not_fall_through":
+        "explicit provider set; the fallback branch is never reached",
+    "test_fastembed_does_not_preempt_a_named_cloud_provider":
+        "explicit provider set; the fallback branch is never reached",
+    # Pins both, but in a loop the AST scan cannot follow.
+    "test_offline_provider_still_wins_when_available":
+        "pins both in a loop, then re-stubs the one under test",
+}
+
+_PROBES = ("_sentence_transformers_available", "_fastembed_available")
+
+# The scan only flags a function that actually asks auto-detect a question.
+# Without this it flags every test of the sentence-transformers import probe
+# (jdoc#118), which never reaches the fallback and for which the FastEmbed
+# probe is irrelevant. A guard with false positives is one nobody believes,
+# and a ratchet nobody believes collects exemptions.
+_AUTODETECT_CALLERS = ("get_provider_name", "should_embed")
+
+
+def _stubbed_probes(node):
+    """Availability probes patched anywhere inside one function body."""
+    import ast
+    found = set()
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Call):
+            continue
+        for arg in sub.args:
+            if isinstance(arg, ast.Constant) and arg.value in _PROBES:
+                found.add(arg.value)
+    return found
+
+
+def _single_probe_offenders(paths):
+    import ast
+    offenders = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            stubbed = _stubbed_probes(node)
+            if len(stubbed) != 1 or node.name in _SINGLE_PROBE_EXEMPT:
+                continue
+            if not any(c in ast.dump(node) for c in _AUTODETECT_CALLERS):
+                continue
+            offenders.append(f"{path.name}::{node.name} pins only {stubbed.pop()}")
+    return offenders
+
+
+def test_no_test_pins_only_one_offline_provider():
+    """jdoc#126 added a SECOND offline provider to auto-detect, so a test that
+    stubs one probe and not the other reads the developer's site-packages for
+    the other half. Five tests did, and every one of them was green on CI and
+    red on a box with fastembed installed
+    ([[feedback_an_assumption_about_the_machine_is_not_a_fixture]])."""
+    from pathlib import Path
+    tests_dir = Path(__file__).resolve().parent
+    offenders = _single_probe_offenders(sorted(tests_dir.glob("test_*.py")))
+    assert not offenders, "tests pinning only one offline provider:\n" + "\n".join(offenders)
+
+
+def test_the_ratchet_is_not_vacuous(tmp_path):
+    """Run the detector against the defect PUT BACK, and against a correct
+    shape it must not flag. A green ratchet and an absent ratchet look
+    identical when the tree is already clean."""
+    bad = tmp_path / "test_bad.py"
+    bad.write_text(
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(prov, '_sentence_transformers_available', lambda: False)\n"
+        "    assert prov.get_provider_name() is None\n",
+        encoding="utf-8",
+    )
+    assert _single_probe_offenders([bad]), "detector missed a single-probe stub"
+
+    # Positive controls: three shapes it must NOT flag.
+    good = tmp_path / "test_good.py"
+    good.write_text(
+        # both probes pinned
+        "def test_y(monkeypatch):\n"
+        "    monkeypatch.setattr(prov, '_sentence_transformers_available', lambda: False)\n"
+        "    monkeypatch.setattr(prov, '_fastembed_available', lambda: False)\n"
+        "    assert prov.get_provider_name() is None\n"
+        "\n"
+        # one pinned, but never asks auto-detect anything (the jdoc#118 shape)
+        "def test_z(monkeypatch):\n"
+        "    monkeypatch.setattr(prov, '_sentence_transformers_available', lambda: True)\n"
+        "    assert prov._sentence_transformers_imports_cleanly() is True\n"
+        "\n"
+        # neither pinned
+        "def test_w():\n"
+        "    assert prov.get_provider_name() in (None, 'fastembed')\n",
+        encoding="utf-8",
+    )
+    assert not _single_probe_offenders([good]), "detector flagged a correct shape"

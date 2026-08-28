@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [1.137.1] - 2026-08-28 - The equivalence is measured, and five tests were reading site-packages
+
+### The measurement behind 1.137.0's allow-list
+
+`sentence-transformers/all-MiniLM-L6-v2` is on the allow-list because it was
+measured, on 2026-08-28, with the tool the allow-list names for the purpose:
+`capture_canary` under sentence-transformers 2.5.0 / torch 2.5.1, then
+`check_drift` under fastembed 0.8.0 / onnxruntime 1.23.2 against that snapshot.
+
+Over the 16 canary strings, **max drift 6.0e-13** (min cosine
+0.9999999999993988) and **max absolute per-component delta 1.9e-07** on 384
+dims. That is float32 rounding, not a difference between models. The control
+that makes it a measurement of ONNX rather than of torch: after the FastEmbed
+pass, `sys.modules` held none of `torch`, `sentence_transformers` or
+`transformers`, and `onnxruntime` was loaded.
+
+End to end on a 32-section corpus indexed under sentence-transformers, then
+re-indexed with `incremental=False` under FastEmbed: **0 calls to the embedder,
+0 texts sent**, no `embedding_rotation` in the response, sidecar header
+unchanged at `sentence-transformers` / `all-MiniLM-L6-v2`, coverage 1.0. The
+fail-closed half was checked at the same entry point: with
+`JDOCMUNCH_FASTEMBED_MODEL=BAAI/bge-small-en-v1.5` the same store discloses
+`embedding_rotation ... full_re_embed` and re-embeds all 32 sections.
+
+⚠ One box, one version pair. The numbers say these two runtimes agree here;
+they are not a claim about every future release of either, which is why the
+allow-list is a list rather than a rule.
+
+### Fixed - five tests pinned half the offline fallback
+
+Adding a second offline provider to auto-detect broke five existing tests that
+stub `_sentence_transformers_available` and not `_fastembed_available` - they
+pinned half the fallback and read the machine for the other half. Invisible on
+CI, which installs neither. A new AST ratchet fails the build when a test pins
+one probe and not the other, scoped to functions that actually call
+`get_provider_name`/`should_embed` so the jdoc#118 probe tests are not false
+positives, with an exemption list carrying reasons. Proven against the defect
+put back and against three shapes it must not flag.
+
+
 ## [1.137.0] - 2026-08-28 - FastEmbed, and an alias narrow enough to be safe
 
 Reported by @LuigiNicaPRO ([#126](https://github.com/jgravelle/jdocmunch-mcp/issues/126)).

@@ -79,6 +79,9 @@ def test_openai_compatible_is_not_auto_detected(monkeypatch):
     _clear_embedding_env(monkeypatch)
     monkeypatch.setenv("JDOCMUNCH_OPENAI_COMPAT_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("JDOCMUNCH_OPENAI_COMPAT_MODEL", "nomic-embed-text")
+    # jdoc#126: both offline providers, or the assertion reads the developer's
+    # site-packages for whichever half is left unpinned.
+    monkeypatch.setattr(emb_provider, "_fastembed_available", lambda: False)
     monkeypatch.setattr(emb_provider, "_sentence_transformers_available", lambda: False)
 
     assert emb_provider.get_provider_name() is None

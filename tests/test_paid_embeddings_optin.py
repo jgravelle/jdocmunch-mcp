@@ -49,9 +49,17 @@ def clean_env(monkeypatch):
 def no_local(monkeypatch):
     """Force the offline fallback unavailable so the cloud decision is visible.
 
-    With sentence-transformers installed the guard falls through to it, which is
+    With an offline provider installed the guard falls through to it, which is
     the desired product behaviour but hides which branch was taken.
+
+    jdoc#126: there are now TWO offline providers, and pinning one of them is
+    pinning half the fallback. Stubbing only sentence-transformers left this
+    fixture reading the developer's site-packages for the other half - green on
+    CI, red on any box with fastembed installed
+    ([[feedback_an_assumption_about_the_machine_is_not_a_fixture]]). Any test
+    reasoning about the offline fallback has to pin both.
     """
+    monkeypatch.setattr(provider, "_fastembed_available", lambda: False)
     monkeypatch.setattr(provider, "_sentence_transformers_available", lambda: False)
 
 
@@ -95,12 +103,27 @@ def test_should_embed_auto_follows_the_guard(clean_env, no_local):
     assert provider.should_embed("auto") is True
 
 
-def test_offline_provider_still_wins_when_available(clean_env, monkeypatch):
+@pytest.mark.parametrize(
+    "available,expected",
+    [
+        ("_sentence_transformers_available", "sentence-transformers"),
+        ("_fastembed_available", "fastembed"),
+    ],
+)
+def test_offline_provider_still_wins_when_available(
+    clean_env, monkeypatch, available, expected
+):
     """Suppressing paid cloud must not disable embedding outright when a local
-    provider exists. Semantic search keeps working, on-machine."""
-    monkeypatch.setattr(provider, "_sentence_transformers_available", lambda: True)
+    provider exists. Semantic search keeps working, on-machine.
+
+    jdoc#126: parametrized over both offline providers, and each case pins the
+    OTHER one off - otherwise the assertion is about which happens to be
+    installed on the machine running it."""
+    for name in ("_sentence_transformers_available", "_fastembed_available"):
+        monkeypatch.setattr(provider, name, lambda: False)
+    monkeypatch.setattr(provider, available, lambda: True)
     clean_env.setenv("OPENAI_API_KEY", "sk-not-a-real-key")
-    assert provider.get_provider_name() == "sentence-transformers"
+    assert provider.get_provider_name() == expected
 
 
 def test_suppression_is_logged_not_silent(clean_env, no_local, caplog):
