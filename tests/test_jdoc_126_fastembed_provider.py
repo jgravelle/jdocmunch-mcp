@@ -381,15 +381,31 @@ class TestCacheProbeIsProviderAware:
 # The extra stays optional, and the download is disclosed
 # ---------------------------------------------------------------------------
 
-def test_fastembed_is_an_optional_extra_not_a_dependency():
-    import tomllib
+def _pyproject_section(name: str) -> str:
+    """Body of one pyproject table, read WITHOUT tomllib.
+
+    ⚠ tomllib is 3.11+, and this repo still supports 3.10 — the same reason
+    `test_server_json_sync.py` reads pyproject with a regex.
+    """
     from pathlib import Path
+    import re
     root = Path(__file__).resolve().parents[1]
-    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert "fastembed" in data["project"]["optional-dependencies"]
-    for dep in data["project"]["dependencies"]:
-        assert "fastembed" not in dep
-        assert "onnxruntime" not in dep
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    pattern = r"^\[" + re.escape(name) + r"\]\n(.*?)(?=^\[|\Z)"
+    match = re.search(pattern, text, re.M | re.S)
+    assert match, f"no [{name}] table in pyproject.toml"
+    return match.group(1)
+
+
+def test_fastembed_is_an_optional_extra_not_a_dependency():
+    extras = _pyproject_section("project.optional-dependencies")
+    assert "\nfastembed = [" in "\n" + extras
+    project = _pyproject_section("project")
+    deps = project.split("dependencies = [", 1)
+    assert len(deps) == 2, "no dependencies list in [project]"
+    runtime = deps[1].split("]", 1)[0]
+    assert "fastembed" not in runtime
+    assert "onnxruntime" not in runtime
 
 
 def test_readme_discloses_the_download():
