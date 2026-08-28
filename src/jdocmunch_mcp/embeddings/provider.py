@@ -1,14 +1,16 @@
 """Embedding providers for semantic section search.
 
 Supports Gemini (text-embedding-004), OpenAI (text-embedding-3-small),
-OpenAI-compatible endpoints, and sentence-transformers (fully offline,
-no API key required).
+OpenAI-compatible endpoints, FastEmbed (offline, ONNX) and
+sentence-transformers (offline, torch) — neither offline provider needs a key.
 
 Auto-detection priority (first available wins):
-    1. JDOCMUNCH_EMBEDDING_PROVIDER env var (gemini/openai/openai-compatible/sentence-transformers/none)
+    1. JDOCMUNCH_EMBEDDING_PROVIDER env var
+       (gemini/openai/openai-compatible/fastembed/sentence-transformers/none)
     2. GOOGLE_API_KEY → Gemini            (opt-in, see below)
     3. OPENAI_API_KEY → OpenAI            (opt-in, see below)
-    4. sentence-transformers installed → local offline model
+    4. fastembed installed → local offline ONNX model
+    5. sentence-transformers installed → local offline torch model
 
 ⚠ Steps 2 and 3 are PAID CLOUD providers and are SKIPPED by auto-detect unless
 JDOCMUNCH_ALLOW_PAID_EMBEDDINGS is set. A bare key in the environment must not
@@ -158,6 +160,51 @@ def _st_model_name() -> str:
     )
 
 
+def _fastembed_model_name() -> str:
+    return os.environ.get(
+        "JDOCMUNCH_FASTEMBED_MODEL", _FastEmbedProvider.DEFAULT_MODEL
+    )
+
+
+def _canonical_hub_model_id(model: str) -> str:
+    """Resolve a bare model name to the hub id both runtimes actually load.
+
+    sentence-transformers accepts ``all-MiniLM-L6-v2`` and resolves it on the
+    hub to ``sentence-transformers/all-MiniLM-L6-v2``; FastEmbed requires the
+    qualified spelling. The two spellings name ONE model, so the equivalence
+    check below compares canonical ids rather than whatever the user typed.
+    """
+    model = (model or "").strip()
+    if not model or "/" in model:
+        return model
+    return f"sentence-transformers/{model}"
+
+
+# ---------------------------------------------------------------------------
+# FastEmbed ⇄ sentence-transformers vector equivalence (jdoc#126)
+# ---------------------------------------------------------------------------
+#
+# ⚠⚠ An ALLOW-LIST OF MODELS, never a blanket rename of the provider. The
+# sidecar header is matched by exact equality on (provider, model, dim), and
+# ``_provider_identity`` returns dim=None for both offline providers — the
+# cache treats that as a WILDCARD, so there is no dim backstop underneath a
+# normalized provider name. Writing "sentence-transformers" over vectors that
+# some other runtime produced would therefore make ``cache.load`` MATCH: the
+# two derivations merge into one sidecar and search ranks across both,
+# silently. That is jdoc#111's shape, and it is worse than the full re-embed
+# it avoids — a re-embed is expensive and observable, this is cheap and
+# invisible.
+#
+# A model earns a place here by being MEASURED identical across the two
+# runtimes, not by looking like it should be. ``check_embedding_drift`` is the
+# measurement: capture a canary under one runtime, re-run it under the other,
+# and read ``max_drift``. Anything not named here is written under the
+# ``fastembed`` provider name and re-embedded, which is the fail-closed side.
+_FASTEMBED_ST_EQUIVALENT_MODELS = frozenset({
+    "sentence-transformers/all-MiniLM-L6-v2",
+})
+
+
 def _st_model_is_cached(model: str) -> bool:
     """Whether ``model`` already sits in the local HuggingFace cache (jdoc#110).
 
@@ -199,13 +246,89 @@ def _st_model_is_cached(model: str) -> bool:
         candidates = [model]
         if "/" not in model:
             candidates.append(f"sentence-transformers/{model}")
+        return _hub_cache_has_model(base, candidates)
+    except OSError:
+        return True
+
+
+def _hub_cache_has_model(base, candidates: list) -> bool:
+    """Whether any of ``candidates`` has a populated snapshot dir under ``base``.
+
+    Split out of :func:`_st_model_is_cached` so the FastEmbed probe reads the
+    same layout rather than a second hand-copied version of it.
+    """
+    for cand in candidates:
+        snapshots = base / ("models--" + cand.replace("/", "--")) / "snapshots"
+        if snapshots.is_dir() and any(snapshots.iterdir()):
+            return True
+    return False
+
+
+def _fastembed_model_is_cached(model: str) -> bool:
+    """Whether ``model`` is already downloaded for FastEmbed (jdoc#126).
+
+    ⚠⚠ FastEmbed does NOT use the HuggingFace hub cache by default — it
+    downloads into its own directory (``FASTEMBED_CACHE_PATH``, otherwise
+    ``<tempdir>/fastembed_cache``). Answering this question with
+    :func:`_st_model_is_cached` would probe the wrong directory: it reports
+    "cached" for a machine whose HF cache holds the model for torch while
+    FastEmbed still has to download it, which reintroduces jdoc#110's outage —
+    a model download inside the MCP client's connect timeout, reported to the
+    user as nothing but "connection timed out".
+
+    ⚠ Only FastEmbed's own roots are probed. A populated HuggingFace hub cache
+    is NOT taken as evidence — FastEmbed passes its own ``cache_dir`` to
+    ``snapshot_download``, so an HF copy may well be there while FastEmbed
+    still downloads. Reading it as "cached" is the harmful guess in exactly the
+    direction jdoc#110 is about, and "not cached" costs only a deferred load.
+
+    Same fail-open-on-error discipline as the sentence-transformers probe: an
+    unreadable cache is not evidence of absence.
+    """
+    if not model:
+        return True
+    import tempfile
+    from pathlib import Path
+    candidates = [model, _canonical_hub_model_id(model)]
+    fe_root = os.environ.get("FASTEMBED_CACHE_PATH", "").strip()
+    root = Path(fe_root) if fe_root else Path(tempfile.gettempdir()) / "fastembed_cache"
+    try:
+        if not root.exists():
+            return False
+        if _hub_cache_has_model(root, candidates):
+            return True
+        # FastEmbed also stores some models as a flat directory named after
+        # the model rather than in the `models--` layout.
         for cand in candidates:
-            snapshots = base / ("models--" + cand.replace("/", "--")) / "snapshots"
-            if snapshots.is_dir() and any(snapshots.iterdir()):
+            flat = root / cand.replace("/", "_")
+            if flat.is_dir() and any(flat.iterdir()):
                 return True
         return False
     except OSError:
         return True
+
+
+def _active_model_is_cached(name: str) -> bool:
+    """Cache probe for whichever offline provider ``name`` selects."""
+    if name == "fastembed":
+        return _fastembed_model_is_cached(_fastembed_model_name())
+    return _st_model_is_cached(_st_model_name())
+
+
+def _fastembed_available() -> bool:
+    """Return True if fastembed is importable.
+
+    Answered from package METADATA for the same reason
+    :func:`_sentence_transformers_available` is: this runs from
+    ``get_provider_name()`` on the startup path, and detection must not be the
+    thing that pays for an import.
+    """
+    try:
+        import importlib.metadata as _md
+        _md.version("fastembed")
+        return True
+    except Exception:
+        return False
 
 
 def _sentence_transformers_available() -> bool:
@@ -284,6 +407,8 @@ def get_provider_name() -> Optional[str]:
         if _openai_compat_url() and _openai_compat_model():
             return "openai-compatible"
         return None
+    if explicit in ("fastembed", "fast-embed", "onnx"):
+        return "fastembed"
     if explicit in ("sentence-transformers", "sentence_transformers", "local"):
         return "sentence-transformers"
     if explicit == "none":
@@ -306,6 +431,14 @@ def get_provider_name() -> Optional[str]:
                 )
             continue
         return name
+    # jdoc#126: FastEmbed outranks sentence-transformers when both are
+    # installed. It reaches the same vectors for the aliased model through
+    # onnxruntime instead of torch, so it is the cheaper of two equal answers.
+    # ⚠ Naming either provider explicitly still wins — this only decides what
+    # an unconfigured machine gets, and `JDOCMUNCH_EMBEDDING_PROVIDER=
+    # sentence-transformers` is the way back.
+    if _fastembed_available():
+        return "fastembed"
     if _sentence_transformers_available():
         return "sentence-transformers"
     return None
@@ -425,6 +558,46 @@ class _OpenAICompatibleProvider:
 
 
 # ---------------------------------------------------------------------------
+# FastEmbed provider (fully offline, ONNX runtime)
+# ---------------------------------------------------------------------------
+
+class _FastEmbedProvider:
+    """Embed via FastEmbed (all-MiniLM-L6-v2 by default, 384 dims).
+
+    Runs entirely offline and pulls in onnxruntime rather than torch. Install
+    with::
+
+        pip install jdocmunch-mcp[fastembed]
+
+    Override the model with the JDOCMUNCH_FASTEMBED_MODEL env var. ⚠ Doing so
+    leaves the equivalence allow-list unless the new id is named there, so the
+    sidecar is written under the ``fastembed`` provider name and the corpus is
+    re-embedded. That is deliberate — see
+    :data:`_FASTEMBED_ST_EQUIVALENT_MODELS`.
+    """
+
+    DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+    BATCH_SIZE = 64
+
+    def __init__(self):
+        from fastembed import TextEmbedding
+        model_name = _fastembed_model_name()
+        self.model_name = model_name
+        self._model = TextEmbedding(model_name=model_name)
+
+    def embed_texts(self, texts: list, task_type: str = "retrieval_document") -> list:
+        # task_type is ignored — MiniLM is symmetric, matching the
+        # sentence-transformers provider's treatment of the same model.
+        if not texts:
+            return []
+        try:
+            return [list(map(float, vec))
+                    for vec in self._model.embed(texts, batch_size=self.BATCH_SIZE)]
+        except Exception:
+            return [[] for _ in texts]
+
+
+# ---------------------------------------------------------------------------
 # sentence-transformers provider (fully offline)
 # ---------------------------------------------------------------------------
 
@@ -518,6 +691,7 @@ _PROVIDER_FACTORIES: dict = {
     "gemini": _GeminiProvider,
     "openai": _OpenAIProvider,
     "openai-compatible": _OpenAICompatibleProvider,
+    "fastembed": _FastEmbedProvider,
     "sentence-transformers": _sentence_transformers_factory,
 }
 
@@ -537,6 +711,8 @@ def _provider_signature(name: str) -> tuple:
     """Compute a cache key that invalidates when env-driven model choice changes."""
     if name == "sentence-transformers":
         return (name, os.environ.get("JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL))
+    if name == "fastembed":
+        return (name, _fastembed_model_name())
     if name == "gemini":
         return (name, _GeminiProvider.MODEL, os.environ.get("GOOGLE_API_KEY", "")[:8])
     if name == "openai":
@@ -628,7 +804,57 @@ def _provider_identity(name: str) -> tuple[str, Optional[int]]:
             os.environ.get("JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL),
             None,
         )
+    if name == "fastembed":
+        return (_fastembed_model_name(), None)
     return (name, None)
+
+
+def _fastembed_aliases_to_st() -> bool:
+    """Whether the active FastEmbed model may reuse a sentence-transformers sidecar.
+
+    Every condition must hold, and each one fails CLOSED:
+
+    * the configured FastEmbed model canonicalises into
+      :data:`_FASTEMBED_ST_EQUIVALENT_MODELS` — an unmeasured model never
+      inherits another runtime's vectors;
+    * it canonicalises to the SAME model the sentence-transformers side would
+      load. ``JDOCMUNCH_ST_MODEL`` is user-settable, so a machine configured
+      for two different models has two different vector spaces and must keep
+      two sidecars.
+    """
+    fe = _canonical_hub_model_id(_fastembed_model_name())
+    st = _canonical_hub_model_id(_st_model_name())
+    return bool(fe) and fe == st and fe in _FASTEMBED_ST_EQUIVALENT_MODELS
+
+
+def sidecar_identity(name: str) -> tuple[str, str, Optional[int]]:
+    """Return the ``(provider, model, dim)`` triple written to the sidecar header.
+
+    Usually the runtime's own name and identity. The one exception is jdoc#126:
+    FastEmbed and sentence-transformers loading the SAME allow-listed model
+    produce interchangeable vectors, so re-embedding a whole corpus to swap
+    runtimes buys nothing. Inside the allow-list FastEmbed writes the
+    sentence-transformers identity and reuses the existing sidecar.
+
+    ⚠⚠ The model string is the sentence-transformers side's SPELLING
+    (``_st_model_name()``), not the canonical hub id. The header is matched by
+    exact string equality, and an existing sidecar carries whatever the user
+    configured — bare ``all-MiniLM-L6-v2`` by default. Writing the canonical id
+    would fail to match the very file this exists to reuse.
+
+    ⚠ Dim stays ``None``. The stored header says ``None`` for every
+    sentence-transformers sidecar ever written, and an active dim of 384 would
+    compare unequal to it and purge the file — the same trap
+    :func:`_sentence_transformers_factory` documents for the embed worker.
+
+    ⚠ Every caller that reads the sidecar identity must call THIS, not
+    ``_provider_identity``, or the reader disagrees with the writer and reports
+    a rotation that never happened (the jdoc#109 lesson).
+    """
+    if name == "fastembed" and _fastembed_aliases_to_st():
+        return ("sentence-transformers", _st_model_name(), None)
+    model, dim = _provider_identity(name)
+    return (name, model, dim)
 
 
 def embed_sections(
@@ -667,8 +893,10 @@ def embed_sections(
     if not provider:
         return sections
 
-    provider_name = get_provider_name() or ""
-    model, dim = _provider_identity(provider_name)
+    # jdoc#126: the header identity, which is the runtime's own name except
+    # when an allow-listed model lets FastEmbed reuse a sentence-transformers
+    # sidecar. Never `_provider_identity` directly — see `sidecar_identity`.
+    provider_name, model, dim = sidecar_identity(get_provider_name() or "")
     # jdoc#111: the char cap is part of the identity, not just the key salt.
     chars = _embed_chars()
 
@@ -905,8 +1133,16 @@ def warmup() -> str:
     ):
         return ""
     name = get_provider_name()
-    if name != "sentence-transformers":
+    if name not in ("sentence-transformers", "fastembed"):
         return ""
+    # ⚠ jdoc#126: the probe below is about sentence-transformers SPECIFICALLY.
+    # FastEmbed never imports that package, so probing it would answer a
+    # question about a stack this process is not going to load — and on a
+    # machine where sentence-transformers is broken it would suppress warmup
+    # for a provider that works fine. onnxruntime loads a different DLL set;
+    # jdoc#118's deadlock is an argument about torch, not evidence about ONNX,
+    # so FastEmbed gets neither the probe nor the worker.
+    #
     # jdoc#118: prove the provider can import BEFORE importing it here. An
     # in-process attempt that deadlocks in the native loader is unkillable and
     # poisons every subsequent library load in this process, so a failure here
@@ -915,7 +1151,11 @@ def warmup() -> str:
     # ⚠ With the worker enabled the import happens in a child, so warming is
     # both safe and worth doing on this daemon thread: the wait is bounded and
     # the child, unlike a wedged thread, can be killed.
-    if not _embed_worker_enabled() and not _sentence_transformers_imports_cleanly():
+    if (
+        name == "sentence-transformers"
+        and not _embed_worker_enabled()
+        and not _sentence_transformers_imports_cleanly()
+    ):
         logger.warning(
             "skipping embedding warmup: sentence-transformers could not be "
             "imported in a probe subprocess (%s). Lexical search is "
@@ -923,7 +1163,7 @@ def warmup() -> str:
             _import_probe_detail or "unknown",
         )
         return ""
-    if not _st_model_is_cached(_st_model_name()):
+    if not _active_model_is_cached(name):
         # ⚠⚠ Deferring the load hands the chatter problem to the first tool
         # call, which is precisely the framing hazard warmup was built to
         # avoid — and by then stdout belongs to JSON-RPC and cannot be
@@ -935,7 +1175,7 @@ def warmup() -> str:
             "embedding model %s is not in the local cache; skipping startup "
             "warmup so the MCP handshake is not blocked by a download "
             "(jdoc#110). It will load on first use.",
-            _st_model_name(),
+            _fastembed_model_name() if name == "fastembed" else _st_model_name(),
         )
         return ""
     try:

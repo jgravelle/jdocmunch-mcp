@@ -2,6 +2,96 @@
 
 ## [Unreleased]
 
+## [1.137.0] - 2026-08-28 - FastEmbed, and an alias narrow enough to be safe
+
+Reported by @LuigiNicaPRO ([#126](https://github.com/jgravelle/jdocmunch-mcp/issues/126)).
+
+### Added - FastEmbed as an offline embedding provider
+
+`pip install jdocmunch-mcp[fastembed]` runs `all-MiniLM-L6-v2` through
+onnxruntime instead of torch. `JDOCMUNCH_EMBEDDING_PROVIDER=fastembed` selects
+it, `JDOCMUNCH_FASTEMBED_MODEL` picks a different model, and auto-detect
+prefers it over sentence-transformers when both are installed —
+`JDOCMUNCH_EMBEDDING_PROVIDER=sentence-transformers` is the way back.
+
+The reported defect was narrow: `get_provider_name()` is a closed if-chain, so
+`fastembed` fell through it to auto-detect and `_PROVIDER_FACTORIES` was
+unreachable for the name. A closed chain and a factory map are two lists that
+have to agree, and nothing asserted that they did; now something does.
+
+### Fixed - the sidecar alias keys on the MODEL, because the sidecar has no dim backstop
+
+Switching runtimes should not re-embed a corpus that has not changed, so the
+reporter proposed normalizing the provider name after `_get_provider()`
+resolves — the header keeps saying `sentence-transformers` and the existing
+vectors load. Right goal. The problem is that the proposed normalization is
+**unconditional**.
+
+`cache.load` matches the header by exact equality on `(provider, model, dim)`,
+and `_provider_identity` returns `dim=None` for both offline providers — which
+the cache reads as a **wildcard**. So there is nothing underneath a normalized
+provider name to catch a mismatch. `JDOCMUNCH_ST_MODEL` is user-settable, so a
+blanket rename writes `sentence-transformers` over vectors some other model
+produced, `cache.load` then **matches**, the two derivations merge into one
+sidecar, and search ranks across both. That is jdoc#111's shape, and it is
+worse than the re-embed it avoids: a full re-embed is expensive and
+observable, this is cheap and invisible.
+
+So the alias is an explicit allow-list of model ids
+(`_FASTEMBED_ST_EQUIVALENT_MODELS`), and it fails closed on every axis — an
+unlisted model, a `JDOCMUNCH_ST_MODEL` naming a different model, or an empty
+model all keep the `fastembed` provider name and re-embed. A model earns a
+place on that list by being measured identical across the two runtimes;
+`check_embedding_drift` is the measurement, since a canary captured under one
+runtime and re-run under the other reports exactly that.
+
+Two details that look like oversights and are not. The alias writes the
+sentence-transformers side's **spelling** (`all-MiniLM-L6-v2` by default), not
+the canonical hub id, because the header is an exact string match against a
+file that already exists. And the dim stays `None`: every sentence-transformers
+sidecar ever written stores `None` there, so an active dim of 384 would compare
+unequal and purge the file the alias exists to reuse — the same trap the embed
+worker documents.
+
+New `sidecar_identity()` is the single place that resolves the header triple.
+`index_local`'s rotation detector reads it too; a reader that skipped the alias
+would report a rotation on every index for a corpus that never moved
+(jdoc#109).
+
+### Fixed - the model-cache probe reads FastEmbed's cache, not HuggingFace's
+
+`_st_model_is_cached()` probes the HuggingFace hub layout, and jdoc#110's
+warmup gate calls it to decide whether a model load would block the MCP
+handshake on a download. FastEmbed downloads into its own directory
+(`FASTEMBED_CACHE_PATH`, otherwise `<tempdir>/fastembed_cache`), so the HF
+probe would answer about a directory FastEmbed does not read: it reports
+"cached" for a machine whose HF cache holds the model for torch while FastEmbed
+still has to fetch it, and warmup then stalls the handshake — jdoc#110's outage,
+which reaches the user as nothing but "connection timed out". A populated HF
+cache is deliberately **not** taken as evidence; guessing "cached" is the
+harmful guess, and guessing "not cached" costs a deferred load.
+
+### Unchanged, on purpose
+
+The sentence-transformers import probe and the embed worker do not fire for
+FastEmbed. Neither one is about embeddings in general; both are about torch.
+onnxruntime loads a different DLL set, so jdoc#118's Windows loader deadlock is
+an argument here rather than evidence, and probing a package this provider
+never imports would suppress a working provider on a machine where
+sentence-transformers happens to be broken. If FastEmbed turns out to wedge the
+same way on Windows, the worker is the fix and the measurement comes first.
+
+`fastembed` is an optional extra and never a runtime dependency — a lexical
+install must not acquire a native runtime it will never call. The first-use
+model download is README-disclosed under "Background behavior, fully disclosed"
+before shipping, per the PyPI-quarantine rule.
+
+Tests `tests/test_jdoc_126_fastembed_provider.py` (42; **41 fail pre-fix**).
+The single both-sides pass is the control that demonstrates the unconditional
+alias matching a sidecar it should not. Suite **2646 / 6**; `ruff check src/`
+clean. No tool, schema or INDEX_VERSION change.
+
+
 ## [1.136.1] - 2026-08-26 - Unverifiable is not verified
 
 ### Fixed - `verify_index` counted a section it could not verify as verified

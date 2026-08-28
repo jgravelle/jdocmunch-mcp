@@ -1,6 +1,6 @@
 [project]
 name = "jdocmunch-mcp"
-version = "1.136.1"
+version = "1.137.0"
 description = "Token-efficient MCP server for structured documentation retrieval via section-level indexing"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,10 @@ openai = ["openai>=1.0.0"]
 minimax = ["openai>=1.0.0"]
 zhipu = ["openai>=1.0.0"]
 semantic = ["google-generativeai>=0.8.0"]
+# jdoc#126: offline embeddings through onnxruntime instead of torch. An
+# OPTIONAL extra, never a runtime dependency -- a lexical install must not
+# acquire a native runtime it will never call.
+fastembed = ["fastembed>=0.8.0"]
 office = ["markitdown[pdf,docx,pptx]>=0.1.6"]
 
 [project.scripts]

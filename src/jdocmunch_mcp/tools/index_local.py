@@ -2196,10 +2196,15 @@ def index_local(
             # header from the provider module's own view, so reading it from
             # anywhere else lets the detector disagree with the writer and
             # report a rotation that never happened.
-            _provider_identity = _emb_provider._provider_identity
+            # ⚠ jdoc#126: `sidecar_identity`, not `_provider_identity` — the
+            # writer applies the FastEmbed alias and a reader that skips it
+            # sees a rotation on every index for a corpus that never moved.
+            _sidecar_identity = _emb_provider.sidecar_identity
             _active_provider = _emb_provider.get_provider_name() or ""
             if _active_provider:
-                _active_model, _active_dim = _provider_identity(_active_provider)
+                _active_provider, _active_model, _active_dim = _sidecar_identity(
+                    _active_provider
+                )
                 # jdoc#111: the embed char cap is part of the identity, so
                 # raising JDOCMUNCH_EMBED_CHARS escalates exactly like a model
                 # change. Without this, a cap change on an unchanged corpus

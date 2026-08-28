@@ -169,7 +169,7 @@ docs/ ──► parser (per format) ──► section tree ──► local index
 - **Parsing** is per format, one module each: Markdown/MDX, reStructuredText, AsciiDoc, Jupyter notebooks, HTML, plain text, OpenAPI (YAML), JSON/JSONC, XML/SVG/XHTML, Godot scenes, and — via the optional `[office]` extra — PDF, DOCX, PPTX, and EPUB.
 - **Storage** is a versioned local index (`INDEX_VERSION = 3`) that auto-migrates on first load. A 1.x release never forces a reindex.
 - **Retrieval** is lexical BM25 by default, hybrid when embeddings are available.
-- **Embeddings are optional and provider-agnostic** — Gemini, OpenAI, an OpenAI-compatible endpoint, or local sentence-transformers. Without one, search stays lexical and entirely offline.
+- **Embeddings are optional and provider-agnostic** — Gemini, OpenAI, an OpenAI-compatible endpoint, or a local offline model through either FastEmbed (ONNX) or sentence-transformers (torch). Without one, search stays lexical and entirely offline.
 
 Deeper detail: [ARCHITECTURE.md](ARCHITECTURE.md) and [SPEC.md](SPEC.md).
 
@@ -188,6 +188,24 @@ JDOCMUNCH_SHARE_SAVINGS=0
 Embedding and summarizer providers call their configured API **only when you enable them**, and never by default. `watch-install` registers a login service **only** when you run it yourself.
 
 ### Background behavior, fully disclosed
+
+**A model download, the first time a local embedding provider runs.** Both
+offline providers fetch their model from HuggingFace on first use and cache it
+on disk. Nothing downloads until you enable embeddings, and a lexical-only
+install never contacts the hub. Startup warmup is **skipped** when the model is
+not already cached, so a first run defers the download to your first search
+rather than stalling the MCP handshake behind it
+([#110](https://github.com/jgravelle/jdocmunch-mcp/issues/110)).
+
+**FastEmbed as the offline provider.** `pip install jdocmunch-mcp[fastembed]`
+runs the same `all-MiniLM-L6-v2` model through onnxruntime instead of torch,
+which is a much smaller install. When both offline providers are present
+FastEmbed is preferred; `JDOCMUNCH_EMBEDDING_PROVIDER=sentence-transformers`
+selects the other one. On the shared model the two write the **same** vector
+store, so switching runtimes does not re-embed your corpus. Point FastEmbed at
+a different model with `JDOCMUNCH_FASTEMBED_MODEL` and it keeps its own vectors
+instead, because vectors from two models are not interchangeable
+([#126](https://github.com/jgravelle/jdocmunch-mcp/issues/126)).
 
 **A child process, when local embeddings are in use.** When the
 `sentence-transformers` provider is active, jDocMunch runs the embedding model
