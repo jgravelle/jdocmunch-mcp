@@ -2,6 +2,96 @@
 
 ## [Unreleased]
 
+### Changed - the brief rotates, and three of its claims are now bound to what they describe
+
+No version bump: documentation and tests only, no `src/` change.
+
+**`CLAUDE.md` 122,832 -> 61,332 chars.** 31 dated `## vX.Y.Z` sections had grown
+to **74.7% of the file** (91,699 chars) against a 130,000 budget. The three
+newest stay; v1.116.0 through v1.135.0 moved VERBATIM into
+`docs/CLAUDE-history.md`.
+
+⚠⚠ **The lever was real and the proposed remedy was wrong.** The brief driving
+this work said to create a root-level `ISSUE-HISTORY.md`, copying
+jcodemunch-mcp. **That is the specific mistake `tests/test_claude_md_size.py`
+exists to stop**, and it says so in its own docstring: the replay self-fixture
+indexes `repo_path: "."`, and `CLAUDE.md` and `docs/CLAUDE-history.md` are both
+in its `extra_ignore_patterns`. A new root-level path would move ~74KB of
+tool-keyword-dense release prose back into the retrieval corpus and re-break the
+same three CHANGELOG goldens - measured once at nDCG 0.906 against a 0.95 gate
+with recall still 1.0. The rotation target was already established and already
+existed; only the rotation itself was overdue.
+
+⚠⚠ **Four standing operational rules were orphaned under a DATED heading and
+would have rotated away with it.** The `tests/`-ships-in-the-sdist warning, the
+gitignored-`uv.lock` note, the numpy-is-dev-only rule and the CI-reproduce
+command all sat inside `## v1.137.0`. **A standing rule filed under a dated
+heading has an expiry date nobody chose.** They now live in a new
+`## Standing operational notes (jdoc-specific)` section, and a
+`## Lessons from rotated entries` section carries what the other 28 entries
+earned, each naming the version whose evidence is in the archive.
+
+### Fixed - the documented CI-reproduce command did not build CI's environment
+
+`CLAUDE.md` told a human to reproduce CI with `uv run --python 3.13 python -m
+pytest tests/ -q`. **There is no sync in that command**, so it ran against
+whatever `.venv` happened to hold - it inherited a state it did not create,
+while `.github/workflows/test.yml` installs with `uv sync --group dev` first.
+
+⚠⚠ jcm shipped this exact command and measured what it costs: the run came back
+**exit 0 with the totals reconciling exactly** while `passed` fell 8,721 to
+8,634 and `skipped` rose 19 to 124 - **105 tests silently did not execute**.
+Exit code and total were both "green". **Read the SKIP count.**
+
+⚠ **jcm's command is NOT the fix here.** Its `uv sync --locked --group dev
+--extra watch` fails in this repo: `uv.lock` is gitignored so `--locked` cannot
+work, and there is no `watch` extra. The documented command is now
+`uv sync --group dev --python 3.13` then `uv run --python 3.13 pytest tests/ -q`.
+
+### Added - three claims that only lived in a gitignored, machine-local skill
+
+The full release checklist lives in the `release` skill, which is **gitignored
+and therefore machine-local**. A fresh clone, another box, or a session without
+it loaded has none of it. Two items are restated in `CLAUDE.md` because each has
+already cost an incident:
+
+- **Read CI for the pushed SHA BEFORE any irreversible step.** ⚠⚠ This matters
+  more here than anywhere else in the suite: jdatamunch auto-releases behind a
+  `workflow_run` gate requiring Tests to have passed, and **jdoc has no release
+  workflow at all**, so every irreversible step is taken by a human who can take
+  it against a red build. Four consecutive jcm releases were published, tagged
+  and PyPI-uploaded on a red lint nobody read.
+- **The MCP registry's rows are nested** - `{server: {...}, _meta: {...}}`, with
+  `isLatest` under `_meta`. A flat `row["name"]` read returns ZERO rows on a
+  publish that completely succeeded, and unlike the known paging trap it
+  **survives `&limit=100`**, so the documented remedy does not help and the
+  symptom is indistinguishable from failure. **A zero-row read is never grounds
+  to re-publish.** Read-after-write lag is real; absence is not evidence of
+  failure.
+
+The header test command now matches the suite rule (`python -m pytest`, not a
+bare `pytest` shim), with the reason stated rather than the form asserted.
+
+### Added - `tests/test_brief_bindings.py` (14)
+
+Prose is what drifted, so the durable half is bindings, not better prose. Each
+asserts a PROPERTY that survives a rewording: the documented reproduce command
+carries the same sync flags as `test.yml` and never `--locked`; the brief says
+to read CI before the irreversible steps; it carries the nested-row warning and
+the do-not-re-publish rule; at most three dated sections remain; and every dated
+heading present at the previous commit now lives in **exactly one** of
+`CLAUDE.md` and `docs/CLAUDE-history.md` - not zero, not both.
+
+⚠ **Seven were seen RED against the unfixed file before any edit.** ⚠⚠ Three of
+them were then found to be wrong BY THEMSELVES rather than by review, which is
+the argument for writing them first: one asserted `"packages" in brief` and
+passed against the unfixed file by matching `site-packages`; one anchored on the
+literal phrase `reproduce CI with` and broke when the fix reworded it; one took
+the FIRST `reproduce CI` in the file and had it stolen by a cross-reference
+added in the same session. **A binding that passes for the wrong reason reports
+the hole as covered.**
+
+
 ## [1.138.0] - 2026-08-29 - A two-channel fusion reported over one channel counted twice, and a 1.25 MB document on the floor
 
 Four findings, all reported from OUTSIDE this repo while doc-indexing
