@@ -2,6 +2,193 @@
 
 ## [Unreleased]
 
+## [1.138.0] - 2026-08-29 - A two-channel fusion reported over one channel counted twice, and a 1.25 MB document on the floor
+
+Four findings, all reported from OUTSIDE this repo while doc-indexing
+`jcodemunch-mcp` from a jcodemunch session. The tracker was clean when the work
+started (0 open issues, 0 open PRs, re-verified rather than trusted).
+
+### #129 - `find_similar_sections` scored summaries and called them bodies
+
+The tool advertised a fusion of "title + body lexical Jaccard". **It had no body
+channel.** `body_text = sec.get("summary")` was unconditional, and under
+`index_local(use_ai_summaries=False)` a summary IS the heading text - documented
+in the tool's own schema. So `body_tokens == title_tokens`, and the
+no-embeddings score `0.70 * body_jac + 0.30 * title_jac` was **one input
+weighted against itself**.
+
+⚠⚠ **The interesting part is not that a score was wrong. It is that a
+two-channel fusion was reported over one channel counted twice**, with a
+`dominant_signal` naming which of the two channels won. Any two sections
+sharing a heading name scored exactly 1.0 and came back `near_duplicate`.
+Measured on a 955-section corpus: **8 of 8 clusters were that artifact** - four
+files with an `Architecture` heading, two with `Watch mode`. Ground truth on one
+such "identical" pair: 1,105 bytes of ASCII sequence diagram against a
+`> **Version note:**` paragraph.
+
+⚠ **The tool's own diff output was the tell it could not read.** Every variant
+returned `body_unique_a: []` AND `body_unique_b: []`. "No unique content on
+either side" is indistinguishable from "I did not read either side", and two
+sections with different byte ranges cannot be both.
+
+**The body channel now reads the section's actual bytes.** The cost was measured
+rather than assumed, because the comment being deleted named a real tradeoff:
+reading every examined body costs **0.24 s** at the default 1000-section cap
+(2.5 s for all 9,507). Deferring the read until after the title pre-filter - the
+obvious optimisation - saves **~6%**, because 899 of 955 sections survive into
+some pair on a doc set with repetitive headings. Not worth two-phase scoring.
+
+⚠⚠ **A pair whose body adds nothing beyond its own title is `title_only` and can
+never be `near_duplicate`.** This is the fail-closed half, and it is what
+protects the case where bytes genuinely cannot be read.
+
+⚠⚠ **An "all pairs were title_only" cap does NOT close it, and the corpus proved
+that.** Union-find merges transitively, so two empty `## Architecture` stubs
+(title_only, score 1.0) join a cluster holding two real, unrelated Architecture
+sections. The cluster then contains a body-bearing pair, passes an all-pairs
+test, and takes its 1.0 from the pair that read nothing. The verdict now rests
+on **`evidence_max_score`** - the best pair that actually compared bodies.
+Reported `max_score` is unchanged, so the two numbers together show exactly what
+happened: that cluster now reads `max_score: 1.0`, `evidence_max_score: 0.3406`,
+`overlapping_topic`.
+
+⚠ The `title_only` refusal is scoped to the lexical-only path deliberately. When
+cosine is available the fusion has a channel that did not come from the title,
+and refusing there would suppress genuine duplicates the embedding channel
+found. Pinned by a test so the scope is not "simplified" away.
+
+⚠ **The sibling was checked and is CLEAN.** `search_sections(dedupe=true)`
+consumes the v1.34 cluster sidecar from `retrieval/dedup.py`, which reads real
+`content`. The defect did not reach ranked search results.
+
+New response keys (additive, 1.x-safe): `signal` on clusters and variants,
+`evidence_max_score` on clusters, `body_signal` inside `differs_by`,
+`body_sources` and `title_only_pairs` in `_meta`. The MCP tool description no
+longer advertises a channel the code does not have, and
+`tests/test_jdoc_129_body_channel.py` binds the description to the behaviour.
+
+⚠⚠ **Both this file's fixtures and the pre-existing
+`tests/test_find_similar_sections.py` now PIN `use_embeddings=False`.** They left
+it at `"auto"`, which turns embeddings on whenever an offline provider happens to
+be installed - so a dev box with fastembed ran a different program from CI, which
+installs neither. Measured: with `"auto"` the two empty-stub sections came back
+at **cosine 1.0** and the guard under test never fired. The v1.137.1 lesson, one
+release later, in a different file.
+
+### #130 - the best retrieval target in the corpus was silently dropped
+
+`jcodemunch-mcp`'s `CHANGELOG.md` is **1,252,519 bytes** and was **not in the
+index at all**. Not gitignored, no error: `index_local` returned
+`file_count: 124`, `success: true` and `truncated: false`.
+
+`DEFAULT_MAX_FILE_SIZE` was **500 KB**. The skip was counted, and
+`coverage.skip_counts` was PERSISTED with the index - **and the response carried
+none of it.**
+
+⚠⚠ **A count computed and withheld at the one moment the caller could act on it
+is the same defect as not computing it.** `truncated` refers only to the
+`max_files` cap, so it was answering a different question truthfully while the
+caller read it as "did I get everything".
+
+**Two halves, and the disclosure is the one that generalises** - it covers every
+future oversize file rather than this one:
+
+- `skip_counts`, `skipped_paths` and `coverage_complete` are now on the response.
+  ⚠ `truncated` KEEPS its documented `max_files` meaning; changing what a shipped
+  key means is forbidden on 1.x. `coverage_complete` is the field it was being
+  misread as.
+- ⚠ `coverage_complete` is keyed on **actionable** skips only. `gitignored` and
+  `unsupported_extension` fire on every real repo (16 and 900 on this corpus);
+  keying on all of them makes it `false` always, and a signal that always fires
+  hides the case it exists for.
+- ⚠⚠ The disclosure is on **all four** response paths, including
+  `"No documentation files found"`. A corpus whose every candidate was dropped
+  for size reported that error verbatim - which reads as "there is nothing here"
+  when the truth is "there is something here and I refused it", and it is the one
+  payload with no `file_count` for a caller to be suspicious of.
+- `skipped_paths` names the file. A caller told `oversize: 1` still cannot tell
+  which file to go and look at. Capped at 20 per reason; the COUNT stays exact
+  and `skipped_paths_truncated` says when the sample is not.
+
+**`DEFAULT_MAX_FILE_SIZE` is now 5 MB, overridable via
+`JDOCMUNCH_MAX_FILE_SIZE`.** ⚠ The number is measured: that real 1.25 MB file
+parses in **1.03 s** with an **8.3 MB** peak into 1,515 sections at a 565-byte
+median, so the parser was never the constraint. ⚠⚠ **The asymmetry is what made
+500 KB indefensible, not the absolute value**: the same walk already granted
+`OFFICE_MAX_FILE_SIZE = 25 MB` to `.pdf`/`.docx`, so the old rule accepted a
+25 MB PowerPoint and refused a 600 KB Markdown file. ⚠ The resolver fails OPEN on
+garbage, `0` and negatives - a typo in an env var must not silently shrink a
+corpus, which is the failure mode this whole change removes. ⚠ The cap is
+resolved at CALL time, not as a default argument, or an env var set after import
+would be read and ignored.
+
+Measured end to end on the reported corpus: **9,624 to 11,138 sections**, full
+re-index 4.7 s. ⚠ The disclosure immediately surfaced a SECOND skip nobody had
+filed - `office_extra_not_installed: 1`, `jcodemunch_whitepaper.pdf` - which had
+been persisted and unreported the whole time. That is the generalising half
+paying for itself on its first run.
+
+### The sdist allowlist guard, ported
+
+jcm 1.108.305 shipped `relnotes.md` - a scratch copy of release notes - inside a
+published sdist, swept up by `git add -A`. **This repo had neither the canary
+tests nor the allowlist**; `pyproject.toml` excluded only `.claude/`.
+
+⚠ The canary half proves NAMED bad paths are absent, and a scratch file has no
+name to plant a canary under. The allowlist catches the class; the denylist
+catches the instance.
+
+`tests/test_sdist_exclusions.py` builds a real sdist and asserts: no canary
+survives an excluded path, nothing ships from one, the allowlist covers every
+root file, **and the allowlist names nothing that has stopped shipping** - a list
+that does not match the artifact is not a guard, and that reverse assertion is
+what catches a wholesale copy of jcm's list (which carries `uv.lock`,
+`Dockerfile` and two dozen root docs this repo does not have).
+
+⚠ Also a per-member size budget. `tests/infographic.png` - 5.9 MB, referenced by
+nothing - was 87% of this source distribution until 1.123.2. It was a TRACKED
+file, so exclusion rules and untracked-file scans were both blind to it, and
+nothing asserted a size budget. All four guards were proven by putting each
+defect back.
+
+⚠⚠ **jdatamunch-mcp was checked and is missing the same guard** - same
+`.claude/`-only exclude, no allowlist. Ported there separately.
+
+### Not changed: JSON indexing (investigated, and the obvious remedy is wrong)
+
+The reported corpus indexed **54 `.json` files producing 88.2% of its sections**,
+80.8% of the total from `benchmarks/` alone, so a prose search returned rows like
+`files_indexed` and `clean_files`.
+
+**General JSON indexing is intended**, established in the code rather than
+assumed: `parser/json_parser.py` exists to convert arbitrary JSON to sections,
+`.json`/`.jsonc` is a documented supported format, and OpenAPI is a separate
+sniffed path that gets richer treatment.
+
+⚠⚠ **A `benchmarks/` skip rule was measured and REJECTED. The directory is the
+wrong axis.** Excluding it drops **20 genuine documentation files** -
+`METHODOLOGY.md`, `REPRODUCING.md`, `whitepaper.md`, four `README.md`s - to
+remove 37 data files. Neither `.gitignore` nor a skip list can separate them,
+because the split is by file KIND and not by location. `SKIP_PATTERNS` is also
+matched as a path SUBSTRING, so a `benchmarks/` entry would take
+`docs/benchmarks/` with it.
+
+⚠ The skip-name authority was checked for the fourth-undeclared-copy problem and
+is clean: `tools/_constants.py` holds `SKIP_PATTERNS`, `DOT_DIR_ALLOWLIST` and
+`is_skipped_dot_dir`, imported by `index_local` and `index_repo` and defined
+nowhere else. `extra_ignore_patterns` remains the mechanism, and it has been
+durable across silent re-entry points since #116.
+
+### Tests
+
+`tests/test_jdoc_129_body_channel.py` (20; **11 fail / 9 pass** against the full
+pre-fix behaviour, the 9 being controls),
+`tests/test_jdoc_130_oversize_disclosure.py` (21; 10 fail with the disclosure
+withheld, 10 with the cap restored, 1 with `coverage_complete` keyed on all
+reasons), `tests/test_sdist_exclusions.py` (10; each of the four guards proven
+against its own defect put back). Suite **2700 passed / 6 skipped** (was
+2646/6); `ruff check src/` clean. No INDEX_VERSION or tool-count change.
+
 ## [1.137.1] - 2026-08-28 - The equivalence is measured, and five tests were reading site-packages
 
 ### The measurement behind 1.137.0's allow-list

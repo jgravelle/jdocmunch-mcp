@@ -23,7 +23,8 @@ from ..security import (
     validate_path,
     is_symlink_escape,
     is_secret_file,
-    DEFAULT_MAX_FILE_SIZE,
+    resolve_max_file_size,
+    MAX_FILE_SIZE_ENV,
 )
 from ..storage import DocStore
 from ..storage.doc_store import INDEX_OWNED_SIDECAR_SUFFIXES, normalize_commit_sha
@@ -1206,14 +1207,90 @@ def _write_sidecars(storage_path, owner: str, name: str, sections: list) -> dict
 _DISCOVERY_HARD_CEILING_MULT = 20  # safety: stop counting at max_files * this
 
 
-def _count_skip(skip_counts: Optional[dict], reason: str) -> None:
+#: Skip reasons a CALLER can act on, so the response names the paths and not
+#: just a tally. ⚠ Deliberately not every reason: `gitignored` and
+#: `unsupported_extension` are ordinary and would be thousands of paths on a
+#: real repo, which is how a disclosure becomes noise nobody reads.
+_ACTIONABLE_SKIP_REASONS = frozenset({
+    "oversize", "stat_error", "read_error", "office_extra_not_installed",
+})
+
+#: Per-reason cap on recorded paths. The COUNT is always exact; this bounds
+#: only the sample, and the response says when it was truncated.
+_MAX_SKIPPED_PATHS_PER_REASON = 20
+
+
+def _count_skip(
+    skip_counts: Optional[dict],
+    reason: str,
+    rel_path: str = "",
+    skip_paths: Optional[dict] = None,
+) -> None:
     """Tally one discovery-time skip (v1.103.0 coverage contract).
 
     No-op when the caller didn't ask for counts, so every existing
     ``discover_doc_files`` call keeps its exact prior behavior.
+
+    jdoc#130: also records the PATH for an actionable reason, because a caller
+    told ``oversize: 1`` still cannot tell which file to go and look at.
     """
     if skip_counts is not None:
         skip_counts[reason] = skip_counts.get(reason, 0) + 1
+    if (
+        skip_paths is not None
+        and rel_path
+        and reason in _ACTIONABLE_SKIP_REASONS
+    ):
+        bucket = skip_paths.setdefault(reason, [])
+        if len(bucket) < _MAX_SKIPPED_PATHS_PER_REASON:
+            bucket.append(rel_path)
+
+
+def _coverage_skips_block(
+    skip_counts: Optional[dict], skip_paths: Optional[dict]
+) -> dict:
+    """The index response's half of the coverage contract (jdoc#130).
+
+    ⚠⚠ These counts were already computed and already PERSISTED into the
+    index's ``coverage.skip_counts``; the response carried none of them. A
+    count computed and withheld at the one moment the caller could act on it
+    is the same defect as not computing it -- jcodemunch-mcp's `churn_surface`
+    and `dead_code_pct: 0.0` are the same shape.
+
+    ⚠ ``truncated`` is NOT what disclosed this and must not be read as though
+    it were: it refers only to the ``max_files`` cap, so a run that dropped a
+    1.25 MB document answered ``truncated: false`` -- true, and the opposite of
+    what the caller needed to know. This block is what makes the drop visible.
+    """
+    nonzero = {k: v for k, v in (skip_counts or {}).items() if v}
+    actionable = {k: v for k, v in nonzero.items() if k in _ACTIONABLE_SKIP_REASONS}
+    # ⚠⚠ `coverage_complete` is the field `truncated` was being misread as.
+    # It is keyed on the ACTIONABLE reasons only: `gitignored` and
+    # `unsupported_extension` fire on every ordinary repo (900 and 16 on the
+    # corpus this was found against), so keying on all of them would make it
+    # False always -- and a signal that always fires hides the case it exists
+    # for, which is the guard-nobody-believes failure this repo has hit twice.
+    block: dict = {"coverage_complete": not actionable}
+    if not nonzero:
+        return block
+    block["skip_counts"] = nonzero
+    paths = {k: list(v) for k, v in (skip_paths or {}).items() if v}
+    if paths:
+        block["skipped_paths"] = paths
+        capped = sorted(
+            k for k, v in paths.items()
+            if nonzero.get(k, 0) > len(v)
+        )
+        if capped:
+            # The COUNT is exact; say plainly that the sample is not.
+            block["skipped_paths_truncated"] = capped
+    if "oversize" in nonzero:
+        block["oversize_note"] = (
+            f"{nonzero['oversize']} file(s) exceeded the per-file size cap "
+            f"({resolve_max_file_size():,} bytes) and are NOT in the index. "
+            f"Raise it with {MAX_FILE_SIZE_ENV}."
+        )
+    return block
 
 
 def _walk_rel(dir_rel: str, name: str = "") -> str:
@@ -1247,12 +1324,13 @@ def _walk_rel(dir_rel: str, name: str = "") -> str:
 def discover_doc_files(
     folder_path: Path,
     max_files: int = 10_000,
-    max_size: int = DEFAULT_MAX_FILE_SIZE,
+    max_size: Optional[int] = None,
     extra_ignore_patterns: Optional[list] = None,
     follow_symlinks: bool = False,
     sort_by: str = "newest",
     skip_counts: Optional[dict] = None,
     include_dot_dirs: Optional[list] = None,
+    skip_paths: Optional[dict] = None,
 ) -> tuple:
     """Discover doc files (.md, .txt, .rst) with security filtering.
 
@@ -1281,6 +1359,11 @@ def discover_doc_files(
         order (the pre-jdoc#16 behavior). Useful for deterministic
         reproducible builds where mtimes can shift.
     """
+    # jdoc#130: resolve the cap HERE, not as a default argument. A default
+    # binds `DEFAULT_MAX_FILE_SIZE` at import, so JDOCMUNCH_MAX_FILE_SIZE set
+    # after this module loads would be read and ignored.
+    if max_size is None:
+        max_size = resolve_max_file_size()
     discovered_items: list = []  # [(file_path, mtime_or_zero), ...]
     warnings = []
     hard_ceiling = max_files * _DISCOVERY_HARD_CEILING_MULT
@@ -1365,7 +1448,10 @@ def discover_doc_files(
                     # pdf/docx/pptx/epub need the optional markitdown extra
                     # (pip install jdocmunch-mcp[office]); distinct skip
                     # reason so coverage reporting names the actual cause.
-                    _count_skip(skip_counts, "office_extra_not_installed")
+                    _count_skip(
+                        skip_counts, "office_extra_not_installed",
+                        rel_path, skip_paths,
+                    )
                     continue
             elif ext not in ALL_EXTENSIONS:
                 _count_skip(skip_counts, "unsupported_extension")
@@ -1375,11 +1461,11 @@ def discover_doc_files(
                 st = file_path.stat()
                 size_cap = OFFICE_MAX_FILE_SIZE if ext in OFFICE_EXTENSIONS else max_size
                 if st.st_size > size_cap:
-                    _count_skip(skip_counts, "oversize")
+                    _count_skip(skip_counts, "oversize", rel_path, skip_paths)
                     continue
                 mtime = st.st_mtime
             except OSError:
-                _count_skip(skip_counts, "stat_error")
+                _count_skip(skip_counts, "stat_error", rel_path, skip_paths)
                 continue
 
             discovered_items.append((file_path, mtime))
@@ -1651,6 +1737,7 @@ def index_local(
         # index-time half of the coverage contract. Only a full walk (no
         # explicit `paths`) records it; a subset call is not a coverage claim.
         walk_skip_counts: dict = {}
+        walk_skip_paths: dict = {}
         if paths:
             doc_files, discover_warnings, requested_rels = _resolve_explicit_paths(
                 folder_path,
@@ -1669,6 +1756,7 @@ def index_local(
                 follow_symlinks=follow_symlinks,
                 sort_by=sort_by,
                 skip_counts=walk_skip_counts,
+                skip_paths=walk_skip_paths,
             )
         warnings.extend(discover_warnings)
 
@@ -1796,6 +1884,12 @@ def index_local(
         )
         if not doc_files and not can_diff_subset:
             err: dict = {"success": False, "error": "No documentation files found"}
+            # jdoc#130: the purest form of the defect. A corpus whose every
+            # candidate was dropped for SIZE reported "No documentation files
+            # found" -- which reads as "there is nothing here" when the truth
+            # is "there is something here and I refused it". This is the one
+            # payload where the caller has no file_count to be suspicious of.
+            err.update(_coverage_skips_block(walk_skip_counts, walk_skip_paths))
             if warnings:
                 err["warnings"] = warnings
             return err
@@ -2164,7 +2258,10 @@ def index_local(
             except Exception as e:
                 warnings.append(f"Failed to read {file_path}: {e}")
                 if not paths:
-                    _count_skip(walk_skip_counts, "read_error")
+                    _count_skip(
+                        walk_skip_counts, "read_error",
+                        str(rel_path), walk_skip_paths,
+                    )
 
         final_git_state = (local_git_head(folder_path), False)
         head_sha, source_dirty = stable_local_git_state(initial_git_state, final_git_state)
@@ -2406,6 +2503,14 @@ def index_local(
                     nochange_result["indexed"] = len(doc_files)
                 else:
                     nochange_result["truncated"] = False
+                # jdoc#130: `truncated` answers only the max_files question,
+                # so it says False while an oversize file is on the floor.
+                # Attached to ALL THREE payloads — nochange included, because
+                # "nothing changed" is the run whose caller is least likely to
+                # look anywhere else (the jdoc#109 lesson).
+                nochange_result.update(
+                    _coverage_skips_block(walk_skip_counts, walk_skip_paths)
+                )
                 return _finish_legacy_reconcile(nochange_result, legacy_ctx)
 
             files_to_parse = set(changed) | set(new)
@@ -2513,6 +2618,9 @@ def index_local(
                 result, graduating, reconciliation_disclosure
             )
             _add_commit_fields(result, updated)
+            result.update(
+                _coverage_skips_block(walk_skip_counts, walk_skip_paths)
+            )
             # jdoc#15: surface truncation on the incremental path too.
             if discovered_count > max_files:
                 result["truncated"] = True
@@ -2728,6 +2836,7 @@ def index_local(
                     ),
                 }
 
+        result.update(_coverage_skips_block(walk_skip_counts, walk_skip_paths))
         # jdoc#15: surface truncation as structured top-level fields so
         # callers can detect it programmatically, not just from a free-text
         # note string. `truncated` is False when the corpus fit entirely

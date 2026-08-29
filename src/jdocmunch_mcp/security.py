@@ -174,7 +174,47 @@ def safe_decode(data: bytes, encoding: str = "utf-8") -> str:
 
 # --- Composite Filters ---
 
-DEFAULT_MAX_FILE_SIZE = 500 * 1024  # 500KB
+# jdoc#130: 5 MB, raised from 500 KB, and overridable.
+#
+# ⚠⚠ 500 KB is a sane ceiling for a SOURCE file and the wrong one for a
+# DOCUMENT. It silently dropped jcodemunch-mcp's 1.25 MB `CHANGELOG.md` --
+# 1,515 heading-delimited sections at a 565-byte median, by a wide margin the
+# highest-leverage retrieval target in that repository and the only file
+# excluded from it. A changelog, a spec, or a generated API reference
+# legitimately runs to megabytes.
+#
+# ⚠ The number is MEASURED, not guessed: that real 1.25 MB file parses in
+# 1.03 s with an 8.3 MB peak, so the parser is not the constraint. The same
+# walk already grants OFFICE_MAX_FILE_SIZE = 25 MB to `.pdf`/`.docx`, so the
+# pre-jdoc#130 rule accepted a 25 MB PowerPoint and refused a 600 KB Markdown
+# file -- the asymmetry, not the absolute value, is what makes 500 KB
+# indefensible here.
+#
+# ⚠ Raising a cap WIDENS coverage, so it ships with the disclosure half
+# (`skip_counts` in the index response). A cap without a route out was jcm's
+# reported defect too (`JCODEMUNCH_MAX_FILE_SIZE`, v1.108.193).
+_DEFAULT_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_FILE_SIZE_ENV = "JDOCMUNCH_MAX_FILE_SIZE"
+
+
+def resolve_max_file_size(env: Optional[dict] = None) -> int:
+    """Per-file size ceiling for text documents, in bytes.
+
+    ``JDOCMUNCH_MAX_FILE_SIZE`` overrides it. ⚠ Fails OPEN on anything
+    unparseable or non-positive: a typo in an env var must not silently shrink
+    a corpus, which is the failure mode this whole change exists to remove.
+    """
+    raw = (env if env is not None else os.environ).get(MAX_FILE_SIZE_ENV, "")
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_FILE_SIZE_BYTES
+    if value <= 0:
+        return _DEFAULT_MAX_FILE_SIZE_BYTES
+    return value
+
+
+DEFAULT_MAX_FILE_SIZE = _DEFAULT_MAX_FILE_SIZE_BYTES
 
 
 def should_exclude_file(

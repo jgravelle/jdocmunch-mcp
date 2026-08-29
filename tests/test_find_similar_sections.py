@@ -9,8 +9,18 @@ from jdocmunch_mcp.tools.find_similar_sections import find_similar_sections
 
 
 def _index(docs_path: str, tmp_path) -> tuple[str, str]:
+    # ⚠ use_embeddings is PINNED off. Left at "auto" it turns on whenever
+    # an offline provider happens to be installed, so a dev box with
+    # fastembed/sentence-transformers runs a different program from CI,
+    # which installs neither (jdoc#129;
+    # [[feedback_an_assumption_about_the_machine_is_not_a_fixture]]).
     storage = str(tmp_path / "store")
-    res = index_local(path=docs_path, use_ai_summaries=False, storage_path=storage)
+    res = index_local(
+        path=docs_path,
+        use_ai_summaries=False,
+        use_embeddings=False,
+        storage_path=storage,
+    )
     assert res["success"], f"Indexing failed: {res}"
     return res["repo"], storage
 
