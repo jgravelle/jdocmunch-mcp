@@ -201,10 +201,12 @@ def test_header_test_command_uses_the_module_form():
 def test_brief_says_to_read_ci_before_the_irreversible_steps():
     """⚠⚠ It matters more here than anywhere else in the suite.
 
-    jdata auto-releases behind a `workflow_run` gate that requires Tests to
-    have passed. **jdoc has no release workflow at all** -- `.github/workflows/`
-    holds only test.yml and replay.yml -- so every irreversible step is taken by
-    a human who can take it against a red build. Four consecutive jcm releases
+    **jdoc has no release workflow at all** -- `.github/workflows/` holds only
+    test.yml and replay.yml -- so every irreversible step is taken by a human
+    who can take it against a red build. (The contrast is jdatamunch, whose
+    release.yml gates on a successful Tests run; ⚠ that is a claim about
+    ANOTHER repo and nothing here can bind it -- CLAUDE.md carries the command
+    to re-read it.) Four consecutive jcm releases
     were published, tagged and PyPI-uploaded on a RED build because the local
     suite was green and nobody read the check.
     """

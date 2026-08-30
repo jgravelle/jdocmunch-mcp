@@ -462,12 +462,31 @@ GITHUB_TOKEN="" gh run list --repo jgravelle/jdocmunch-mcp --limit 3 \
 ```
 
 ⚠⚠ **This matters more in jdoc than anywhere else in the suite, and the reason
-is structural.** jdatamunch auto-releases behind a `workflow_run` gate that
-requires Tests to have passed. **jdoc has no release workflow at all** —
+is structural.** **jdoc has no release workflow at all** —
 `.github/workflows/` holds `test.yml` and `replay.yml` and nothing else — so
 every irreversible step here is taken by a human, and a human can take it
 against a red build. `tests/test_brief_bindings.py` fails if that workflow set
-ever changes, so this claim cannot go stale quietly.
+ever changes, so THAT half cannot go stale quietly.
+
+⚠⚠ **The contrast is with jdatamunch, and this file CANNOT bind that half.**
+jdata's `release.yml` runs `on: workflow_run: workflows: ["Tests"]` and gates on
+`conclusion == 'success'`, so a red build there does not release — verified
+2026-08-30 by reading the file, not inferred from the release skill's prose.
+**A claim about another repo's workflow is exactly the shape this section was
+written to distrust**, and no test here can check it. Re-read it rather than
+quoting this line:
+
+```bash
+GITHUB_TOKEN="" gh api repos/jgravelle/jdatamunch-mcp/contents/.github/workflows/release.yml \
+  --jq '.content' | base64 -d | head -30
+```
+
+⚠ Same file also no-ops when `pyproject.toml`'s version already has a release
+(`gh release view "$TAG" ... && exit 0`), so a docs-only push to jdata master is
+safe and does NOT need a version bump to avoid a failed tag. ⚠⚠ **I advised the
+opposite on 2026-08-29 from the release skill's one-line summary without opening
+the workflow** — the summary says jdata "AUTO-RELEASES on push to master", which
+is true and incomplete, and the missing half is the guard.
 
 ⚠ **Pushing is not checking, and a green local suite is not a green build.**
 Four consecutive jcm releases (.259–.262) were published, tagged and
