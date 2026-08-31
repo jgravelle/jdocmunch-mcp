@@ -40,8 +40,11 @@ names the module to port from. ⚠ It is the ONE new test that passes against th
 unfixed tree, so it is the one that needed proving non-vacuous — proven by
 adding the forbidden call and watching it fire.
 
-⚠ **jdatamunch still ships the field unbased** (checked 2026-08-30, not fixed
-from that session).
+⚠ **jdatamunch CAUGHT UP 2026-08-31, both halves** — v1.31.13 stamps the basis
+(`schema_token_basis.py`, singular `token`, not this repo's `schema_basis.py`)
+and measures its tiers in `benchmarks/tier_surface.json`: `core` 65.8% avoided,
+`standard` **5.6%** over three tools. Same verdict as here, a scope bundle
+rather than a token lever. Re-read that repo before quoting this line.
 
 **The tiers are MEASURED for the first time** — `benchmarks/tool_surface/`, a
 regenerable harness plus JSON artifact. At 64 tools / 13,252 schema tokens:
