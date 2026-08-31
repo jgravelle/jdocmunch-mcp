@@ -21,6 +21,80 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-08-30 — v1.137.0
+
+Moved out of `CLAUDE.md` when v1.139.0 made a fourth dated section. What it
+EARNED — the wildcard-`dim` sidecar merge, the closed-chain/factory-map
+disagreement, and the provider-aware cache probe — was lifted into `CLAUDE.md`'s
+"Lessons from rotated entries" before it moved. Only the evidence is here.
+
+## v1.137.0 — #126: the alias keys on the MODEL, because the sidecar has no dim backstop
+
+FastEmbed as an offline provider (`[fastembed]` extra, onnxruntime not torch),
+reported by @LuigiNicaPRO. The reported defect is narrow — `get_provider_name()`
+is a closed if-chain, so `fastembed` fell through it to auto-detect and
+`_PROVIDER_FACTORIES` was unreachable for the name. ⚠ **A closed chain and a
+factory map are two lists that must agree and nothing asserted it**; a test now
+does, and it asserts the resolved name EQUALS the requested one — the weaker
+`name in _PROVIDER_FACTORIES` form passes pre-fix, because an unrecognised
+spelling resolves to something else.
+
+⚠⚠ **The reported remedy — normalize the provider name so the header keeps
+saying `sentence-transformers` — is UNCONDITIONAL, and that is the whole
+finding.** `cache.load` matches `(provider, model, dim)` by exact equality and
+`_provider_identity` returns `dim=None` for BOTH offline providers, which the
+cache reads as a **wildcard**. So there is no dim backstop underneath a
+normalized provider name. `JDOCMUNCH_ST_MODEL` is user-settable, so a blanket
+rename writes `sentence-transformers` over vectors another model produced,
+`cache.load` then MATCHES, and the two derivations merge into one sidecar that
+search ranks across. **jdoc#111's shape, and worse than the re-embed it avoids:
+a full re-embed is expensive and observable, this is cheap and invisible.**
+
+`_FASTEMBED_ST_EQUIVALENT_MODELS` is an explicit per-model allow-list, failing
+closed on an unlisted model, a divergent `JDOCMUNCH_ST_MODEL`, and an empty
+model. ⚠ **A model earns a place there by being MEASURED**, and
+`check_embedding_drift` is the measurement — a canary captured under one runtime
+and re-run under the other reports exactly the equivalence being claimed.
+
+⚠ Two details that read as oversights and are not. The alias writes the
+sentence-transformers **SPELLING** (`all-MiniLM-L6-v2`), not the canonical hub
+id, because the header is an exact string match against a file that already
+exists. And **dim stays `None`** — every ST sidecar ever written stores `None`,
+so an active 384 compares unequal and purges the file the alias exists to reuse
+(the same trap `_sentence_transformers_factory` documents for the worker).
+
+⚠ New `sidecar_identity()` is the ONE place resolving the header triple;
+`index_local`'s rotation detector reads it too, or it reports a rotation on every
+index for a corpus that never moved (jdoc#109).
+
+⚠⚠ **The cache probe is provider-aware, and this is a jdoc#110 regression
+waiting to happen.** `_st_model_is_cached` probes the HF hub layout; FastEmbed
+downloads to `FASTEMBED_CACHE_PATH` / `<tempdir>/fastembed_cache`. Sharing the
+probe reports "cached" for a machine whose HF cache holds the model for TORCH
+while FastEmbed still fetches it — warmup then blocks the handshake on a
+download, which reaches the user as nothing but "connection timed out". **A
+populated HF cache is deliberately NOT evidence**: guessing "cached" is the
+harmful guess, "not cached" costs a deferred load.
+
+⚠ **The ST import probe and the embed worker do NOT fire for FastEmbed.**
+Neither is about embeddings; both are about torch. onnxruntime loads a different
+DLL set, so jdoc#118 is an ARGUMENT here and not evidence — and probing a package
+this provider never imports would suppress a working provider on a machine where
+sentence-transformers is broken. If FastEmbed wedges the same way on Windows the
+worker is the fix, and the measurement comes first.
+
+⚠ Auto-detect prefers FastEmbed over sentence-transformers when both are
+installed; explicit `JDOCMUNCH_EMBEDDING_PROVIDER=sentence-transformers` is the
+way back. Extra is OPTIONAL, never a runtime dep. First-use model download is
+README-disclosed before release (PyPI-quarantine rule).
+
+Tests `tests/test_jdoc_126_fastembed_provider.py` (42; **41 fail pre-fix**, the
+one both-sides pass being the control that demonstrates the unconditional alias
+matching a sidecar it should not). Suite **2646 / 6**; `ruff check src/` clean.
+No tool, schema or INDEX_VERSION change.
+
+- **v1.136.0 - the one string that survives tool deferral.** The MCP `initialize` response now carries an `instructions` string; it did not before, because the transport called `create_initialization_options()` bare and the field went out empty. ⚠⚠ **Invisible in a normal session, CONCENTRATED in a deferred one**: a host over its schema budget ships tool NAMES and withholds the JSONSchemas, so an agent sees 64 bare strings and none of the descriptions. The spec delivers `instructions` on a SEPARATE TRACK from the tool list, so it arrives whole - in a plain MCP client it is the entire steering budget this server gets. 909 chars against a 1,000 cap. ⚠ Also sets `Server(..., version=__version__)`: without it the SDK reports ITS OWN version in `serverInfo`. ⚠ `__version__` is `"unknown"` under `PYTHONPATH=src`, so a green test does NOT prove the wire carries a real number. ⚠⚠ **Ported from jcodemunch-mcp v1.108.292 - both defects were present here unchanged, and neither had a symptom anyone could report.** ⚠⚠ **The port also reproduced a NameError in BOTH repos** (`logger` through a module-level name neither server.py defines) and **only jdoc caught it** - jdata's suite was GREEN with the identical bug, because it had no F821 gate. jdoc's `test_lint_gate_regressions.py` did its job. **A setting fixed in one repo of a suite is fixed in one repo, and that applies to the GATES as much as the code.** `tests/test_mcp_instructions.py` binds the prose to the catalog; all three guards were verified by reintroducing the defect each names.
+
 ## v1.135.0 — #121: the filter keys on the SUFFIX, because the orphan case is the worse one
 
 `list_repos` globbed `*/*.json`, excluded only `_` and `.summary.json`, and so

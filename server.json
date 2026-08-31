@@ -3,12 +3,12 @@
   "name": "io.github.jgravelle/jdocmunch-mcp",
   "title": "jDocmunch MCP",
   "description": "Section-level doc search for .md, .rst, .adoc, .ipynb, .html, .yaml, .json, and OpenAPI specs.",
-  "version": "1.138.0",
+  "version": "1.139.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "jdocmunch-mcp",
-      "version": "1.138.0",
+      "version": "1.139.0",
       "transport": {
         "type": "stdio"
       }

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.139.0] - 2026-08-30 - A token count with no time basis, and a tier that is not a lever
+
 ### Fixed - `schema_tokens_avoided` shipped a count with no time basis
 
 `get_session_stats`'s `tool_surface` block reported `schema_tokens_avoided`
