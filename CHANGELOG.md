@@ -2,6 +2,78 @@
 
 ## [Unreleased]
 
+### Fixed - `schema_tokens_avoided` shipped a count with no time basis
+
+`get_session_stats`'s `tool_surface` block reported `schema_tokens_avoided`
+beside `schema_tokens_visible` / `schema_tokens_catalog` with nothing saying
+over what interval. A reader supplies the missing basis, and supplies the wrong
+one: **per request**.
+
+⚠⚠ **The tool-schema block is stable across requests**, so it is paid at full
+rate roughly once per cache lifetime and at cache-read rates (~0.1x) thereafter.
+jcodemunch-mcp measured **86% of baseline input cached** (1,938,176 of 2,247,575
+tokens, `benchmarks/codex_surface/`) and states in its own words that the
+"N tokens in every request" framing is wrong - *and that the repository said
+exactly that before measuring*. Read per-request, the field overstated the cost
+impact by roughly an order of magnitude, **in the direction that flatters us.**
+
+The response now carries `schema_tokens_basis` and `schema_tokens_basis_note`
+beside every count. ⚠ **The arithmetic is untouched, deliberately.** The count
+answers a real question - how much payload the surface carries - and a silently
+discounted one answers neither that nor the cost question. Same rule as
+`analyze_perf`'s raw `hit_rate` kept beside `hit_rate_basis`. Additive keys
+only; no existing key changed meaning.
+
+⚠ **The constants live in ONE module** (`schema_basis.py`) and are imported. A
+second copy that agrees today is what makes a later divergence invisible.
+
+⚠⚠ **Ported from jcodemunch-mcp 1.108.312. Its SIBLING release, 1.108.311, was
+deliberately NOT ported**: that one refuses a mid-session tool-tier switch that
+cannot repay the prompt cache it invalidates, and the defect cannot occur here -
+`JDOCMUNCH_TOOL_PROFILE` is read at startup and there is no runtime switch, so
+there is no invalidation to price. Porting the gate would be machinery for a
+mechanism we do not have. A ratchet fails the day a
+`notifications/tools/list_changed` appears in `src/` without a pricing helper
+beside it, and names the module to port from. **Proven non-vacuous by adding the
+forbidden call and watching it fire** - it is the one new test that passes
+against the unfixed tree, so it is the one that needed proving.
+
+⚠ **jdatamunch-mcp still ships the field unbased** as of 2026-08-30, checked and
+not fixed from this session.
+
+### Added - the tool-profile tiers are measured, and `standard` is not a token lever
+
+`benchmarks/tool_surface/` - a regenerable harness plus its JSON artifact. It
+reads the tier lists **live from `server._build_tools_list`**, the same function
+`list_tools` returns, and weighs them with the server's own `_schema_weight`.
+
+⚠⚠ **Weigh what the client RECEIVES, not the catalog filtered by the tier
+bundle.** jcodemunch's first attempt did the latter and was wrong by three tools
+in every tier: it kept a hidden tool set and dropped force-included ones,
+pricing a surface no client is ever sent. Here `_ALWAYS_PRESENT_TOOLS` and
+`JDOCMUNCH_DISABLED_TOOLS` both change the answer and only the builder knows it.
+
+Measured at 64 tools / 13,252 schema tokens: **`core` drops 62.08% of the
+payload (49 tools). `standard` drops 9.39% (8 tools)** - `analyze_perf`,
+`check_embedding_drift`, `find_endpoint`, `find_operations_using_schema`,
+`get_schema_graph`, `get_session_stats`, `list_endpoints_by_tag`,
+`tune_weights`, i.e. the whole OpenAPI query surface for a tenth of the payload.
+jcm's `standard` measured 9 of 91 tools and 6.7%; the shape is the same in both.
+
+⚠ **`standard` stays and is documented, not deleted.** Removing a shipped
+profile breaks an existing 1.x config. But a setting that implies a saving it
+does not deliver is the same defect class as an unstated basis, so the config
+comment now says what it is: a scope choice, not a token lever. Choose `core`
+for that.
+
+⚠ `list_tools`, the meter and the benchmark now share one builder and one
+weigher; the closure inside `_tool_surface_stats` is gone. `_filter_tools`
+takes a `profile_override` so a tier can be priced **without switching to it** -
+answering a question about a surface must not mutate the session's.
+
+`tests/test_schema_tokens_basis.py` (9). **8 of the 9 were run against the
+unfixed tree and failed there**; the ninth is the ratchet described above.
+
 ### Changed - the brief rotates, and three of its claims are now bound to what they describe
 
 No version bump: documentation and tests only, no `src/` change.
