@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.139.1] - 2026-09-01 - the Sonnet rate was written for a date that never arrived
+
 ### Fixed - the Sonnet rate in `PRICING` was written for a date that never arrived
 
 `token_tracker.PRICING["claude_sonnet"]` was `$3.00 / 1M` input tokens. Claude

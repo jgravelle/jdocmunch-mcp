@@ -28,6 +28,52 @@ EARNED — the wildcard-`dim` sidecar merge, the closed-chain/factory-map
 disagreement, and the provider-aware cache probe — was lifted into `CLAUDE.md`'s
 "Lessons from rotated entries" before it moved. Only the evidence is here.
 
+## Rotated 2026-09-01 — v1.137.1
+
+Moved out of `CLAUDE.md` on 2026-09-01 when v1.139.1 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first —
+the asserted-vs-measured equivalence and its separate release, the control that
+names which implementation ran, and the auto-detect chain invalidating tests
+that pinned its first member.
+
+## v1.137.1 — the equivalence is MEASURED, and five tests were reading site-packages
+
+⚠⚠ **v1.137.0 shipped the allow-list with the equivalence ASSERTED, not
+measured — this closes that.** `capture_canary` under sentence-transformers
+2.5.0 / torch 2.5.1, then `check_drift` under fastembed 0.8.0 / onnxruntime
+1.23.2 against that snapshot: over 16 canary strings **max drift 6.0e-13** (min
+cosine 0.9999999999993988), **max per-component delta 1.9e-07** on 384 dims.
+Float32 rounding, not a model difference. ⚠ **The control is what makes it a
+measurement of ONNX rather than of torch**: after the pass, `sys.modules` held
+none of torch / sentence_transformers / transformers, and onnxruntime was
+loaded. Without that check a silent fallback to the ST provider would produce
+a perfect score and mean nothing.
+
+End to end on a 32-section corpus indexed under ST, re-indexed
+`incremental=False` under FastEmbed: **0 embedder calls, 0 texts**, no
+`embedding_rotation`, header unchanged, coverage 1.0. Fail-closed half at the
+same entry point: `JDOCMUNCH_FASTEMBED_MODEL=BAAI/bge-small-en-v1.5` discloses
+`full_re_embed` and re-embeds all 32. ⚠ One box, one version pair — **the
+allow-list is a LIST rather than a rule for exactly this reason.**
+
+⚠⚠ **Installing fastembed on this box turned FIVE existing tests red, and CI
+could not see it because CI installs neither offline provider.** They stub
+`_sentence_transformers_available` and not `_fastembed_available`, so they
+pinned half the fallback and read the developer's site-packages for the other
+half ([[feedback_an_assumption_about_the_machine_is_not_a_fixture]]).
+**Adding a second member to an auto-detect chain invalidates every test that
+pinned the first one.** New AST ratchet in
+`tests/test_jdoc_126_fastembed_provider.py` fails when a test pins one probe
+and not the other. ⚠ Scoped to functions that actually call
+`get_provider_name`/`should_embed` — without that it flags every jdoc#118
+import-probe test, which never reaches the fallback, and **a guard with false
+positives is one nobody believes**. Exemptions carry reasons; proven against
+the defect put back AND against three shapes it must not flag.
+
+⚠ The measurement is a SEPARATE release, not an edit to 1.137.0's entry —
+that artifact is on PyPI and its CHANGELOG is what it shipped with
+(the v1.134.1 provenance lesson).
+
 ## v1.137.0 — #126: the alias keys on the MODEL, because the sidecar has no dim backstop
 
 FastEmbed as an offline provider (`[fastembed]` extra, onnxruntime not torch),

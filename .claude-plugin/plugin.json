@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "jdocmunch",
   "displayName": "jDocMunch",
-  "version": "1.139.0",
+  "version": "1.139.1",
   "description": "Token-efficient MCP server for structured documentation retrieval via section-level indexing",
   "author": {
     "name": "J. Gravelle",

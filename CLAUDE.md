@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.139.0 |
+**Version:** 1.139.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,47 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.139.1 — a rate written for a date that never arrived
+
+**`token_tracker.PRICING["claude_sonnet"]` was $3.00/1M input tokens.** Claude
+Sonnet 5 is **$2.00/1M** and always has been: it launched at $2.00 with a rise
+to $3.00 scheduled for **2026-09-01**, and Anthropic cancelled that increase the
+day before it would have applied. $3.00 is the superseded Sonnet 4.6's rate —
+exactly what the line's comment ("Claude Sonnet 5 / 4.6") conflated.
+
+⚠⚠ **A constant written for a FUTURE date is wrong for the whole interval
+before it, and reads identically to a stale one.** The header said "As of
+2026-06-24", which made the value look *checked*. It was wrong on that date too.
+**A date on a table is evidence of when someone looked, never of what they saw.**
+
+⚠⚠ **A key that names a FAMILY inherits whichever member's price someone last
+looked at.** Three of the four keys are family names; each comment now names the
+ONE model its rate belongs to. ⚠ **The KEYS are unchanged** — `claude_sonnet` is
+emitted verbatim in the `cost_avoided` block of every retrieval response, so a
+rename is a wire change on 1.x. The model identity goes in the comment.
+
+⚠⚠ **Four copies of this rate exist across the suite and they AGREED WITH EACH
+OTHER while being wrong together**, which is why nothing caught it. Verified
+against the source page's *Base Input Tokens* column, not another copy of the
+table. ⚠ `TOKEN_SAVINGS.md` was the fourth copy here and carried two figures
+DERIVED from the rate (`0.0055` / `0.2830` in the worked `_meta` example) —
+derived literals move when a rate moves and are invisible to a search for the
+rate's name.
+
+⚠ **`gpt5_latest` is UNTOUCHED and the CHANGELOG says so.** Not an Anthropic
+model, no source consulted; pinned at the value it shipped with so a drift is
+visible, not because $10.00 was verified. **Pinning a number is not the same as
+vouching for it, and the pin must say which it is.**
+
+`tests/test_pricing_rates.py` (4). The only prior reference to `PRICING` was a
+key-PRESENCE check (`tests/test_storage.py:259`), so **no test pinned any value**
+and a wrong rate could sit here indefinitely. ⚠ The prices are **restated** from
+the source page, not imported from the module — a pin that reads the value it
+checks asserts nothing. Proven non-vacuous: with $3.00 put back, 3 of 4 fail.
+
+Suite **2722 / 11** under the CI-equivalent sync; `ruff check src/` clean. No
+tool, schema or INDEX_VERSION change; `cost_avoided` VALUES change, keys do not.
 
 ## v1.139.0 — a token count with no time basis, and a tier that is not a lever
 
@@ -199,44 +240,6 @@ the full pre-fix behaviour) and `tests/test_jdoc_130_oversize_disclosure.py`
 (21). Suite **2700 / 6**; `ruff check src/` clean. No tool, schema or
 INDEX_VERSION change.
 
-## v1.137.1 — the equivalence is MEASURED, and five tests were reading site-packages
-
-⚠⚠ **v1.137.0 shipped the allow-list with the equivalence ASSERTED, not
-measured — this closes that.** `capture_canary` under sentence-transformers
-2.5.0 / torch 2.5.1, then `check_drift` under fastembed 0.8.0 / onnxruntime
-1.23.2 against that snapshot: over 16 canary strings **max drift 6.0e-13** (min
-cosine 0.9999999999993988), **max per-component delta 1.9e-07** on 384 dims.
-Float32 rounding, not a model difference. ⚠ **The control is what makes it a
-measurement of ONNX rather than of torch**: after the pass, `sys.modules` held
-none of torch / sentence_transformers / transformers, and onnxruntime was
-loaded. Without that check a silent fallback to the ST provider would produce
-a perfect score and mean nothing.
-
-End to end on a 32-section corpus indexed under ST, re-indexed
-`incremental=False` under FastEmbed: **0 embedder calls, 0 texts**, no
-`embedding_rotation`, header unchanged, coverage 1.0. Fail-closed half at the
-same entry point: `JDOCMUNCH_FASTEMBED_MODEL=BAAI/bge-small-en-v1.5` discloses
-`full_re_embed` and re-embeds all 32. ⚠ One box, one version pair — **the
-allow-list is a LIST rather than a rule for exactly this reason.**
-
-⚠⚠ **Installing fastembed on this box turned FIVE existing tests red, and CI
-could not see it because CI installs neither offline provider.** They stub
-`_sentence_transformers_available` and not `_fastembed_available`, so they
-pinned half the fallback and read the developer's site-packages for the other
-half ([[feedback_an_assumption_about_the_machine_is_not_a_fixture]]).
-**Adding a second member to an auto-detect chain invalidates every test that
-pinned the first one.** New AST ratchet in
-`tests/test_jdoc_126_fastembed_provider.py` fails when a test pins one probe
-and not the other. ⚠ Scoped to functions that actually call
-`get_provider_name`/`should_embed` — without that it flags every jdoc#118
-import-probe test, which never reaches the fallback, and **a guard with false
-positives is one nobody believes**. Exemptions carry reasons; proven against
-the defect put back AND against three shapes it must not flag.
-
-⚠ The measurement is a SEPARATE release, not an edit to 1.137.0's entry —
-that artifact is on PyPI and its CHANGELOG is what it shipped with
-(the v1.134.1 provenance lesson).
-
 ## Lessons from rotated entries (v1.116.0–v1.137.0, lifted 2026-08-29 / 2026-08-30)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
@@ -265,6 +268,17 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **An equivalence you ASSERT to ship an allow-list is owed a MEASUREMENT,
+  and the measurement is a SEPARATE release.** 1.137.0 shipped the allow-list on
+  an asserted equivalence; 1.137.1 measured it (max drift 6.0e-13 over 16 canary
+  strings). Editing 1.137.0's entry instead would have rewritten what is already
+  on PyPI — that artifact's CHANGELOG is what it shipped with. (v1.137.1)
+- ⚠⚠ **A cross-implementation measurement needs a CONTROL saying which
+  implementation ran.** After the pass, `sys.modules` held no torch /
+  sentence_transformers / transformers and did hold onnxruntime. Without that
+  check a silent fallback to the other provider scores perfectly and means
+  nothing. ⚠ One box, one version pair — which is exactly why the allow-list is
+  a LIST and not a rule. (v1.137.1)
 - ⚠⚠ **A rename that makes two derivations COMPARE EQUAL is worse than the
   re-embed it avoids.** `cache.load` matches `(provider, model, dim)` by exact
   equality and both offline providers report `dim=None`, which the cache reads as
@@ -318,6 +332,13 @@ entry that earned no reusable rule got no line.
 
 **Testing and measurement**
 
+- ⚠⚠ **Adding a second member to an auto-detect chain invalidates every test
+  that pinned the first one.** Installing fastembed turned FIVE existing tests
+  red; they stubbed one provider probe and read the developer's site-packages
+  for the other. CI saw none of it — CI installs neither provider. ⚠ The AST
+  ratchet is SCOPED to functions that actually reach the fallback: unscoped it
+  flagged every import-probe test, and **a guard with false positives is one
+  nobody believes.** (v1.137.1)
 - ⚠⚠ **Never restate a timing budget as a literal in a test.** A test asserted
   that a whole call beat the budget of one step inside it. Import the constant.
   (v1.128.0)
@@ -898,7 +919,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.137.0 rotated there 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.137.1 rotated there 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
