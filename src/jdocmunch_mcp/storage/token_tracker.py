@@ -21,11 +21,22 @@ _BYTES_PER_TOKEN = 4
 _TELEMETRY_URL = "https://j.gravelle.us/APIs/savings/post.php"
 _SAVINGS_LOCK = threading.Lock()
 
-# Input-token prices, USD per token. As of 2026-06-24 (anthropic.com/pricing).
-# The retired Opus 4.0/4.1 were $15.00/1M; current Opus (4.8/4.7/4.6) is $5.00/1M.
+# Input-token prices, USD per token. Verified 2026-09-01 against
+# platform.claude.com/docs/en/about-claude/pricing (Model pricing → Base Input
+# Tokens). The retired Opus 4.0/4.1 were $15.00/1M; current Opus is $5.00/1M.
+#
+# ⚠ A key that names a FAMILY inherits whichever member's price someone last
+# looked at. Three of the four keys below are family names, so each comment
+# names the ONE model its rate belongs to.
+#
+# ⚠⚠ A constant written for a FUTURE date is wrong for the whole interval
+# before it, and reads identically to a stale one. `claude_sonnet` sat at $3.00
+# because Sonnet 5's introductory $2.00 was scheduled to rise to $3.00 on
+# 2026-09-01 — an increase Anthropic then cancelled. It was never $3.00, and the
+# header date made the value look checked.
 PRICING = {
-    "claude_opus":   5.00 / 1_000_000,  # Claude Opus 4.8 / 4.7 / 4.6 — $5.00 / 1M input tokens
-    "claude_sonnet": 3.00 / 1_000_000,  # Claude Sonnet 5 / 4.6 — $3.00 / 1M input tokens
+    "claude_opus":   5.00 / 1_000_000,  # Claude Opus 5 — $5.00 / 1M input tokens
+    "claude_sonnet": 2.00 / 1_000_000,  # Claude Sonnet 5 — $2.00 / 1M input (superseded 4.6 was $3)
     "claude_haiku":  1.00 / 1_000_000,  # Claude Haiku 4.5 — $1.00 / 1M input tokens
     "gpt5_latest":  10.00 / 1_000_000,  # GPT-5.2 (latest flagship GPT) — $10.00 / 1M input tokens
 }

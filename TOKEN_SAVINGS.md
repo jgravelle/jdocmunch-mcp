@@ -112,13 +112,13 @@ Every retrieval and search response carries real-time accounting in `_meta`:
   "total_tokens_saved": 94320,
   "cost_avoided": {
     "claude_opus": 0.0092,
-    "claude_sonnet": 0.0055,
+    "claude_sonnet": 0.0037,
     "claude_haiku": 0.0018,
     "gpt5_latest": 0.0184
   },
   "total_cost_avoided": {
     "claude_opus": 0.4716,
-    "claude_sonnet": 0.2830,
+    "claude_sonnet": 0.1886,
     "claude_haiku": 0.0943,
     "gpt5_latest": 0.9432
   }
@@ -133,10 +133,15 @@ Every retrieval and search response carries real-time accounting in `_meta`:
 
   | Key | Model | Rate |
   |---|---|---:|
-  | `claude_opus` | Claude Opus 4.8 / 4.7 / 4.6 | $5.00 |
-  | `claude_sonnet` | Claude Sonnet 5 / 4.6 | $3.00 |
+  | `claude_opus` | Claude Opus 5 | $5.00 |
+  | `claude_sonnet` | Claude Sonnet 5 | $2.00 |
   | `claude_haiku` | Claude Haiku 4.5 | $1.00 |
   | `gpt5_latest` | GPT-5.2 | $10.00 |
+
+⚠ **`claude_sonnet` read $3.00 until 2026-09-01.** That was Sonnet 5's
+scheduled-but-cancelled increase, not a price it ever carried; $3.00 is the
+superseded Sonnet 4.6's rate. A key naming a family inherits whichever member's
+price someone last looked at, so each row above now names one model.
 
 ⚠ **A previous revision of this file documented `claude_opus` at $15/1M.** That
 was the retired Opus 4.0/4.1 rate; the shipped code has used $5.00/1M since those

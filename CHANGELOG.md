@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Fixed - the Sonnet rate in `PRICING` was written for a date that never arrived
+
+`token_tracker.PRICING["claude_sonnet"]` was `$3.00 / 1M` input tokens. Claude
+Sonnet 5 is **$2.00 / 1M** and always has been: it launched at $2.00 with an
+increase to $3.00 scheduled for 2026-09-01, and Anthropic cancelled that
+increase the day before it would have applied. $3.00 is the superseded Sonnet
+4.6's rate, which the line's comment ("Claude Sonnet 5 / 4.6") conflated with
+Sonnet 5's.
+
+⚠⚠ **A constant written for a FUTURE date is wrong for the whole interval
+before it, and reads identically to a stale one.** The table's header said "As
+of 2026-06-24", which made the value look checked. It was wrong on that date
+too.
+
+⚠ **A key that names a FAMILY inherits whichever member's price someone last
+looked at.** Three of the four keys are family names; each comment now names
+the one model its rate belongs to. The **keys are unchanged** - `claude_sonnet`
+is emitted verbatim in the `cost_avoided` block of every retrieval response, so
+renaming it would be a wire change on 1.x.
+
+Verified 2026-09-01 against the Model pricing table's *Base Input Tokens*
+column at <https://platform.claude.com/docs/en/about-claude/pricing>, including
+the note recording that the scheduled increase "will not occur". ⚠ **Re-read
+the source page, not another copy of the table** - four copies of this rate
+exist across the suite and they agreed with each other while being wrong
+together, which is why nothing caught it.
+
+⚠ **`gpt5_latest` is untouched.** It is not an Anthropic model, no source was
+consulted for it, and it is pinned at the value it shipped with so that a drift
+is visible - not because $10.00 was verified.
+
+`TOKEN_SAVINGS.md` published the same rate plus two figures derived from it
+(`0.0055` / `0.2830` in the worked `_meta` example); both were recomputed.
+
+### Added - value pins for the pricing table
+
+`tests/test_pricing_rates.py` (4). The only prior reference to `PRICING` was a
+key-presence check (`tests/test_storage.py:259`), so no test pinned any value
+and a wrong rate could sit here indefinitely. The expected prices are
+**restated** from the source page rather than imported from the module - a pin
+that reads the value it checks asserts nothing. Proven non-vacuous: with the
+$3.00 put back, 3 of the 4 fail.
+
 ## [1.139.0] - 2026-08-30 - A token count with no time basis, and a tier that is not a lever
 
 ### Fixed - `schema_tokens_avoided` shipped a count with no time basis
