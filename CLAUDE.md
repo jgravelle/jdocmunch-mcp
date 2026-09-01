@@ -477,10 +477,22 @@ descendant-inclusive, every one of those sums silently starts double-counting.
 
 ## Release: the two steps that are only written down here
 
-⚠⚠ **The full checklist lives in the `release` skill, which is GITIGNORED and
-therefore MACHINE-LOCAL.** A checkout on another box, a fresh clone, or a
-session without that skill loaded has none of it. These two items were lost that
-way and are restated here because each one has already cost a real incident.
+⚠⚠ **The full checklist lives in the `release` skill, which is now TRACKED
+HERE at `.claude/skills/release/SKILL.md` (2026-09-01).** It is still
+GITIGNORED and therefore MACHINE-LOCAL in jcodemunch-mcp, which is where this
+copy came from — verbatim, plus a marked delta block, because two copies that
+drift silently are worse than one copy with an explicit delta list.
+
+⚠⚠ **The two items below STAY restated here, and that is not redundancy.**
+Each has already cost a real incident, and a skill file is loaded only when
+something loads it — the brief is loaded every session. **This section is what
+made the 1.139.1 release recoverable when the skill turned out to be absent
+from this repo entirely**, so do not delete it as duplicated now that the skill
+is tracked. ⚠ `pyproject.toml`'s `exclude = [".claude/"]` keeps the skill out
+of the sdist; the CI guard at `.github/workflows/test.yml:80` matches
+`/.claude/` with a trailing slash, so `.claude-plugin/` does not false-positive
+and the guard can now actually fire — its own comment records that it never
+could, because nothing under `.claude/` had ever been tracked.
 
 ### 1. READ CI FOR THE PUSHED SHA BEFORE ANY IRREVERSIBLE STEP
 
