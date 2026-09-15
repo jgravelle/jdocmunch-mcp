@@ -38,6 +38,7 @@ def get_sections(
         return {"error": f"Repo not found: {repo}"}
 
     results = []
+    ambiguous: list = []
     total_tokens_saved = 0
     total_boilerplate_stripped = 0
     total_code_compressed = 0
@@ -50,8 +51,16 @@ def get_sections(
 
     for section_id in section_ids:
         sec = index.get_section(section_id)
+        # v1.147.0: a caller-supplied id may be a `doc.md#anchor` reference; an
+        # ambiguous one is disclosed on its own entry, never resolved silently.
+        disclosure = index.anchor_disclosure(section_id) if isinstance(section_id, str) else None
+        if disclosure:
+            ambiguous.append(disclosure["warning"])
         if not sec:
-            results.append({"error": f"Section not found: {section_id}"})
+            if disclosure:
+                results.append({"error": disclosure["warning"], **disclosure})
+            else:
+                results.append({"error": f"Section not found: {section_id}"})
             continue
 
         content = store.get_section_content(owner, name, section_id, _index=index)
@@ -115,7 +124,10 @@ def get_sections(
         tokens_saved = estimate_savings(raw_bytes, response_bytes)
         total_tokens_saved += tokens_saved
 
-        results.append({"section": result_sec, "tokens_saved": tokens_saved})
+        entry = {"section": result_sec, "tokens_saved": tokens_saved}
+        if disclosure:
+            entry.update(disclosure)
+        results.append(entry)
 
     total = record_savings(total_tokens_saved, storage_path)
     ca = cost_avoided(total_tokens_saved, total)
@@ -187,6 +199,11 @@ def get_sections(
         "section_count": len(results),
         "_meta": meta,
     }
+    if ambiguous:
+        # Top level as well as per entry: a default response filter can strip
+        # `_meta`, and a caller that skims entries should still be told.
+        out["anchor_ambiguous"] = True
+        out["warning"] = " ".join(ambiguous)
     _mod = _offload()
     if _mod is not None:
         # Entries wrap the section under a "section" key and some are errors

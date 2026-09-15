@@ -57,6 +57,7 @@ def get_section_excerpts(
         return {"error": "section_ids must be a list"}
 
     out: list = []
+    ambiguous: list = []
     found = 0
     missing = 0
     total_full = 0
@@ -68,8 +69,16 @@ def get_section_excerpts(
             missing += 1
             continue
         sec = index.get_section(sid)
+        # v1.147.0: ambiguous `doc.md#anchor` references are disclosed per entry.
+        disclosure = index.anchor_disclosure(sid)
+        if disclosure:
+            ambiguous.append(disclosure["warning"])
         if not sec:
-            out.append({"requested_id": sid, "error": f"Section not found: {sid}"})
+            if disclosure:
+                out.append({"requested_id": sid, "error": disclosure["warning"],
+                            **disclosure})
+            else:
+                out.append({"requested_id": sid, "error": f"Section not found: {sid}"})
             missing += 1
             continue
         content = store.get_section_content(owner, name, sid, _index=index)
@@ -100,6 +109,7 @@ def get_section_excerpts(
             "truncated": truncated,
             "full_byte_length": full_bytes,
             "excerpt_byte_length": excerpt_bytes,
+            **(disclosure or {}),
         })
         found += 1
 
@@ -107,7 +117,7 @@ def get_section_excerpts(
     total = record_savings(tokens_saved, storage_path)
     ca = cost_avoided(tokens_saved, total)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "sections": out,
         "section_count": len(out),
@@ -120,3 +130,8 @@ def get_section_excerpts(
             **ca,
         },
     }
+    if ambiguous:
+        # Top level too: `_meta` can be stripped by a response filter.
+        result["anchor_ambiguous"] = True
+        result["warning"] = " ".join(ambiguous)
+    return result

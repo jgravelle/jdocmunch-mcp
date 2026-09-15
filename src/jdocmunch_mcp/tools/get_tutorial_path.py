@@ -380,7 +380,12 @@ def get_tutorial_path(
         return {"error": f"Repo not found: {repo}"}
 
     sec = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not sec:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     start_doc = sec.get("doc_path", "")
@@ -424,7 +429,7 @@ def get_tutorial_path(
             }
         )
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "start": {"section_id": section_id, "doc_path": start_doc},
         "chain": chain,
@@ -435,3 +440,6 @@ def get_tutorial_path(
             "chain_length": len(chain),
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

@@ -84,7 +84,12 @@ def get_section_excerpt(
         return {"error": f"Repo not found: {repo}"}
 
     sec = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not sec:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     content = store.get_section_content(owner, name, section_id, _index=index)
@@ -110,7 +115,7 @@ def get_section_excerpt(
     ca = cost_avoided(tokens_saved, total)
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return {
+    out = {
         "section": summary_view,
         "excerpt": excerpt,
         "truncated": truncated,
@@ -124,3 +129,6 @@ def get_section_excerpt(
             **ca,
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

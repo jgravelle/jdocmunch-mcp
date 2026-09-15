@@ -270,7 +270,8 @@ def get_section_blast_radius(
     Args:
         repo: Repository identifier (owner/name).
         section_id: Stable section ID, format
-            ``{repo}::{doc_path}::{slug}#{level}``.
+            ``{repo}::{doc_path}::{slug}#{level}``. v1.147.0: a ``doc.md#anchor``
+            reference is accepted; an ambiguous one is refused with the candidates.
         max_depth: BFS depth over the inbound reference graph.
             Default 3.
         storage_path: Custom storage path.
@@ -289,19 +290,30 @@ def get_section_blast_radius(
     if not index:
         return {"error": f"Repo not found: {repo}"}
 
+    # v1.147.0: the walk answers for ONE section, so an ambiguous
+    # `doc.md#anchor` reference is refused rather than walked for the first
+    # duplicate.
+    refusal = index.anchor_refusal(section_id)
+    if refusal:
+        return refusal
+
     sec = index.get_section(section_id)
     if not sec:
         return {"error": f"Section not found: {section_id}"}
 
+    # The slug and the tutorial chains are read from the STORED id; an anchor
+    # reference or an alias would parse to an empty slug and drop the anchor
+    # channel from the walk.
+    stored_id = sec.get("id") or section_id
     doc_path = sec.get("doc_path", "")
-    _, _, slug, _ = _parse_section_id(section_id)
+    _, _, slug, _ = _parse_section_id(stored_id)
     title = sec.get("title", "")
 
     direct, transitive = _walk_transitive(index, doc_path, slug, max_depth)
 
     anchor_count = sum(1 for d in direct if d["link_kind"] == "anchor")
     tutorial_count, tutorial_details = _tutorial_chains_broken(
-        repo=repo, section_id=section_id, doc_path=doc_path,
+        repo=repo, section_id=stored_id, doc_path=doc_path,
         index=index, storage_path=storage_path,
     )
 
@@ -316,14 +328,20 @@ def get_section_blast_radius(
         total_sections=len(index.sections),
     )
 
+    target = {
+        "section_id": section_id,
+        "doc_path": doc_path,
+        "title": title,
+    }
+    if stored_id != section_id:
+        # v1.147.0: the caller sent an anchor reference or an alias; say which
+        # stored section the walk started from.
+        target["resolved_section_id"] = stored_id
+
     return {
         "result": {
             "repo": f"{owner}/{name}",
-            "target": {
-                "section_id": section_id,
-                "doc_path": doc_path,
-                "title": title,
-            },
+            "target": target,
             "direct_impact": direct,
             "transitive_impact": transitive,
             "summary": {

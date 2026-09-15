@@ -9,6 +9,7 @@ from urllib.parse import quote, urlparse
 import httpx
 
 from ..parser import parse_file, preprocess_content, ALL_EXTENSIONS
+from ..parser.sections import duplicate_anchor_fields
 from ..security import is_secret_file
 from ..storage import DocStore
 from ..storage.doc_store import format_repo_at_sha, normalize_commit_sha
@@ -325,6 +326,9 @@ async def index_repo(
                         # #132's rule: every success shape carries the keys, so
                         # nobody branches on whether they are present.
                         **changes_fields([]),
+                        # The stored sections still hold any duplicate, so a run
+                        # that changed nothing reports it like the others.
+                        **duplicate_anchor_fields(updated.sections),
                         "_meta": {"latency_ms": latency_ms},
                     }
                     if updated.repo_at_sha:
@@ -433,6 +437,7 @@ async def index_repo(
                     "sha_certified": sha_certified,
                     "changed": 0, "new": 0, "deleted": 0,
                     **changes_fields([]),
+                    **duplicate_anchor_fields(updated.sections if updated else []),
                     "_meta": {"latency_ms": latency_ms},
                 }
                 if head_sha:
@@ -499,6 +504,7 @@ async def index_repo(
                 "changed": len(changed), "new": len(new), "deleted": len(deleted),
                 **changes_fields(build_changes_list(new, changed, deleted, repo_mtimes)),
                 "section_count": len(updated.sections) if updated else 0,
+                **duplicate_anchor_fields(updated.sections if updated else []),
                 "indexed_at": updated.indexed_at if updated else "",
                 "semantic_search": use_embeddings and get_provider_name() is not None,
                 "source_dirty": False,
@@ -575,6 +581,7 @@ async def index_repo(
             "indexed_at": saved.indexed_at,
             "file_count": len(parsed_files),
             "section_count": len(all_sections),
+            **duplicate_anchor_fields(all_sections),
             "doc_types": doc_types,
             "files": parsed_files[:20],
             **changes_fields(

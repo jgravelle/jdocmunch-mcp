@@ -57,8 +57,16 @@ def describe_section(
         return {"error": f"Repo not found: {repo}"}
 
     target = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not target:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
+    # Everything below walks the tree by STORED id; the caller's string may be an
+    # anchor reference or an alias.
+    tid = target.get("id") or section_id
 
     # ---- section view (minus content + raw embedding, plus derived byte_length) ----
     section_view = {k: v for k, v in target.items() if k not in ("content", "embedding")}
@@ -68,7 +76,7 @@ def describe_section(
 
     # ---- ancestor chain ----
     chain: list[dict] = [target]
-    seen: set = {section_id}
+    seen: set = {tid}
     cur = target
     while True:
         pid = cur.get("parent_id")
@@ -92,7 +100,7 @@ def describe_section(
     )
     prev_sec = next_sec = None
     for i, sec in enumerate(same_doc):
-        if sec.get("id") == section_id:
+        if sec.get("id") == tid:
             if i > 0:
                 prev_sec = same_doc[i - 1]
             if i + 1 < len(same_doc):
@@ -101,12 +109,12 @@ def describe_section(
     parent_id = target.get("parent_id")
     parent_sec = index.get_section(parent_id) if parent_id else None
     children = sorted(
-        (s for s in index.sections if s.get("parent_id") == section_id),
+        (s for s in index.sections if s.get("parent_id") == tid),
         key=lambda s: s.get("byte_start", 0) or 0,
     )
     first_child = children[0] if children else None
 
-    return {
+    out = {
         "section_id": section_id,
         "doc_path": target_doc,
         "section": section_view,
@@ -125,3 +133,6 @@ def describe_section(
             "indexed_at": index.indexed_at,
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

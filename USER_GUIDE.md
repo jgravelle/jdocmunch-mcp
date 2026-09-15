@@ -300,6 +300,20 @@ local/myproject::guide.md::quick-start#1
 
 IDs are returned by `get_toc`, `get_toc_tree`, `get_document_outline`, and `search_sections`. Pass them to `get_section`, `get_sections`, or `get_section_context` to retrieve content.
 
+### Explicit heading ids (v1.147+)
+
+A Markdown heading may carry an id that does not depend on its wording:
+
+```markdown
+## Export fails when the cache volume is full {#ex-cache42}
+```
+
+The id becomes the section's slug. Each section whose id changed, the anchored one and its unanchored descendants alike, lists its earlier ids (the id v1.146.0 gave it, and the id it would have with every marker removed) in its own `alias_ids` (omitted when empty), and those keep resolving unless another section now holds the same id as its own; the section's own explicit id is its `anchor`. Syntax is the Kramdown / `attr_list` form, so the anchor also works in Jekyll and Hugo, and in MkDocs once the `attr_list` Markdown extension is enabled (MkDocs ignores `{#id}` without it). Ids are matched case-insensitively, in the heading and in a reference alike (`#EX-CACHE42` finds `{#ex-cache42}`), must start with a letter, and may then use letters, digits, `_` and `-`. The document part of a reference is a path and is matched as written, not case-folded.
+
+Any tool that takes a `section_id` or `section_ids` also accepts a `doc.md#anchor` reference (`docs/exporting.md#ex-cache42`, `exporting.md#ex-cache42`, or a bare `#ex-cache42` when only one document uses it). If the reference is ambiguous the response says so with `anchor_ambiguous`, `anchor_scope`, `anchor_match_count` and a `warning`. `get_section` adds `sections`, every match with its body; for a duplicate inside one document `section` stays the first match, and for an id shared by several documents there is no `section` and it is not an error. The other tools add `anchor_candidates` (`id`, `doc_path`, `title`): a duplicate inside one document serves the first match, and an id shared by several documents is an `error` naming every candidate. Qualify the reference with a document path, or pass a stored section id, to select one. `check_section_delete_safe` and `get_section_blast_radius` answer for one section, so they refuse a duplicate inside one document too, and when given a reference or an alias they add `resolved_section_id`, the stored id they analysed.
+
+`index_local` and `doc_index_repo` responses that index or find nothing to change carry `duplicate_anchors` (empty when none) and `duplicate_anchor_warning` for an id written twice in one document, and the `index-file` command prints them for the file it re-indexed. The background re-index after an edit does not show them.
+
 For local folders, `repo` defaults to `local/{folder-name}` — use the bare folder name when calling retrieval tools:
 
 ```

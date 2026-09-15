@@ -36,12 +36,20 @@ def get_related_sections(
         return {"error": f"Repo not found: {repo}"}
 
     target = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not target:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
+    # The sidecar and the relation graph are keyed by STORED id; the caller's
+    # string may be an anchor reference or an alias, which neither contains.
+    tid = target.get("id") or section_id
 
     # v1.24.0: prefer the persisted adjacency sidecar when present.
     persisted_used = False
-    persisted = _persisted_lookup(storage_path, owner, name, section_id)
+    persisted = _persisted_lookup(storage_path, owner, name, tid)
     if persisted is not None:
         out = {
             "section_id": section_id,
@@ -60,7 +68,7 @@ def get_related_sections(
             index._rehydrate_embeddings()
         out = get_related(
             index.sections,
-            section_id,
+            tid,
             mode=mode,
             top_n=top_n,
             min_score=min_score,
@@ -82,7 +90,7 @@ def get_related_sections(
             "JDOCMUNCH_OPENAI_COMPAT_MODEL."
         )
 
-    return {
+    resp = {
         "repo": f"{owner}/{name}",
         "section_id": section_id,
         "title": target.get("title", ""),
@@ -90,3 +98,6 @@ def get_related_sections(
         "semantic": out.get("semantic", []),
         "_meta": meta,
     }
+    if disclosure:
+        resp.update(disclosure)
+    return resp

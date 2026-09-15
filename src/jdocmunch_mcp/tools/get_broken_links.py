@@ -8,6 +8,7 @@ from typing import Optional
 
 from ..storage import DocStore
 from ..parser import ALL_EXTENSIONS
+from ..parser.sections import SAFE_ANCHOR_ID_RE, split_explicit_id
 
 # Links that start with these are external — skip them
 _EXTERNAL_SCHEMES = ("http://", "https://", "ftp://", "mailto:", "tel:")
@@ -63,8 +64,6 @@ def _github_slug(text: str) -> str:
 # marker is NOT part of the generated text slug, so it is stripped before
 # slugging — a heading "Foo {#bar}" renders anchors `bar` and the text slug
 # `foo`, never the marker-polluted `foo-bar`.
-_EXPLICIT_ID_MARKER_RE = re.compile(r"\s*\{#[^}]*\}\s*$")
-_EXPLICIT_ID_CAPTURE_RE = re.compile(r"\{#(?P<id>[^}]*)\}\s*$")
 # Raw HTML anchor targets embedded in doc bodies: <a id=>, <a name=>, <h* id=>.
 # Every Markdown engine that allows inline HTML renders these as real anchors.
 _HTML_ANCHOR_RE = re.compile(r"""<a\b[^>]*?\b(?:id|name)\s*=\s*["'](?P<id>[^"']+)["']""", re.I)
@@ -72,7 +71,7 @@ _HTML_HEADING_ID_RE = re.compile(r"""<h[1-6]\b[^>]*?\bid\s*=\s*["'](?P<id>[^"']+
 # A renderer-safe explicit/HTML id: starts with a letter, id-safe chars only. A
 # leading digit or whitespace means no renderer emits a usable fragment
 # (e.g. id="bad id with spaces", {#1-invalid} both fall back to a text slug).
-_SAFE_ANCHOR_ID_RE = re.compile(r"^[A-Za-z][\w-]*$")
+_SAFE_ANCHOR_ID_RE = SAFE_ANCHOR_ID_RE
 # Code/comment scrubbing so an <a id=> shown inside a fenced example or an HTML
 # comment is not mistaken for a real anchor target.
 _FENCE_TOGGLE_RE = re.compile(r"^\s{0,3}(```+|~~~+)")
@@ -80,20 +79,10 @@ _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
 
-def _split_explicit_id(title: str) -> tuple:
-    """Split a heading title into (text_without_marker, explicit_id_or_None).
-
-    ``explicit_id`` is returned (lowercased) only when the {#id} payload is a
-    renderer-safe id; an unsafe payload still has its marker stripped from the
-    text so the generated slug is the marker-free text slug, never the polluted
-    'heading-text-custom-id' form (#64)."""
-    m = _EXPLICIT_ID_CAPTURE_RE.search(title)
-    if not m:
-        return title, None
-    raw_id = m.group("id").strip()
-    text = _EXPLICIT_ID_MARKER_RE.sub("", title).rstrip()
-    explicit = raw_id.lower() if _SAFE_ANCHOR_ID_RE.match(raw_id) else None
-    return text, explicit
+# v1.147.0: the splitter moved to parser/sections.py so the INDEXER and this
+# checker cannot drift apart. Re-exported under the old private name because
+# tests import it from here.
+_split_explicit_id = split_explicit_id
 
 
 def _scrub_code(text: str) -> str:
@@ -146,7 +135,15 @@ def _build_rendered_anchors(sections: list, raw_by_doc: Optional[dict] = None) -
         if sec.get("level", 0) == 0:
             continue
         doc = sec.get("doc_path", "")
-        text, explicit_id = _split_explicit_id(sec.get("title", ""))
+        # v1.147.0: the indexer now strips the marker and persists the id on
+        # the section, so the stored ``anchor`` is the authority. Splitting the
+        # title is the LEGACY path and must stay: an index built before this
+        # version has no ``anchor`` field and still carries the marker verbatim
+        # in its title, and it must keep validating without a reindex.
+        text = sec.get("title", "")
+        explicit_id = sec.get("anchor") or None
+        if not explicit_id:
+            text, explicit_id = _split_explicit_id(text)
         if explicit_id:
             _add(doc, explicit_id)
             _add(doc, f"user-content-{explicit_id}")

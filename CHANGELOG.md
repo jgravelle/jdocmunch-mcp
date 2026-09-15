@@ -2,6 +2,129 @@
 
 ## [Unreleased]
 
+### Added - `{#custom-id}` on a Markdown heading is now the section's id
+
+A heading may carry an explicit id, and that id becomes the section's slug:
+
+```markdown
+## Export FAILS when the cache volume is full -- the partial file is removed {#ex-cache42}
+```
+
+indexes as `...::ex-cache42#2` instead of
+`...::exporting/export-fails-when-the-cache-volume-is-full-the-partial-file-is-removed#2`.
+A cross-document pointer is then written `[ex](docs/exporting.md#ex-cache42)`
+and survives any rewording of the heading it points at.
+
+The syntax is Kramdown / PHP Markdown Extra / Python-Markdown `attr_list`, so
+the anchors stay clickable in Jekyll, Hugo and Docusaurus, and in MkDocs when
+the `attr_list` Markdown extension is enabled (MkDocs ignores `{#id}` without
+it). Markdown only; no other parser sets the field.
+
+New `Section.anchor` and `Section.alias_ids`, both persisted only when
+non-empty. `DocIndex.get_section` now resolves an id, an alias id, or a
+`doc.md#anchor` reference, so `get_sections`, `get_section_context` and every
+other consumer inherit anchor resolution from one producer.
+
+**An anchor is the WHOLE slug path, not a leaf under the ancestor chain.** The
+prefix exists only to disambiguate same-named headings; inheriting it would put
+an ancestor heading's words back into an id whose entire purpose is to stop
+depending on words, so renaming the H1 would still break every pointer aimed at
+the H2. Unanchored descendants inherit the anchored prefix, so anchoring one
+heading stabilizes its subtree.
+
+**An ambiguous reference returns EVERY match, with its body, in one call.** A
+browser picks one because it scrolls to one place; a JSON response has no such
+constraint. An id written twice yields both sections under `sections`, alongside
+`anchor_ambiguous`, `anchor_scope`, `anchor_match_count` and a `warning`. No
+follow-up call is needed to read the second body.
+
+What differs between the two cases is only which match, if any, is promoted to
+the singular `section` key. Within ONE document, order is author-controlled and
+meaningful, so the first is promoted -- purely so an existing consumer sees the
+shape it always saw. Across DOCUMENTS there is no ordering at all, so nothing is
+promoted: an arbitrary pick, read by a caller that skips the warning, is the
+failure this design exists to refuse. All the new keys are additive and absent
+on the unambiguous path.
+
+**Indexing reports duplicates, because that is when the author can still fix
+them.** `index_local` and `doc_index_repo` responses that index or find nothing
+to change carry `duplicate_anchors` (the document, the id, and every section
+that claimed it; empty when none) and a one-line `duplicate_anchor_warning`.
+The `index-file` command prints the same keys for the file it re-indexed and
+nothing else. The PostToolUse hook runs that re-index in a background worker
+whose output is discarded, so the warning does not reach the author there.
+`index_local` responses that report an existing handle without reading its
+index (worktree reuse, the legacy-reconcile report) carry no duplicate keys.
+Duplicates ACROSS documents are not reported: a fragment is relative to the
+document containing it, so the same id in two files is ordinary, and flagging
+it would fire on every repo whose archive convention copies headings verbatim.
+
+**`alias_ids` keeps earlier ids resolving.** A section whose id changes also
+answers to its earlier ids: the id v1.146.0 built from the raw heading (it kept
+a `{#id}` marker in the slug, and an unsafe marker such as `{#has space}` too)
+and the id it would have with every marker removed. A real id wins over an
+alias, and an index built by an earlier version and re-indexed now keeps every
+id it handed out, unless another section now holds that id as its own. A
+document with no marker gets no `alias_ids`.
+
+**Every tool that takes a caller-supplied id discloses an ambiguous anchor
+reference, not only `get_section`.** Resolving through the index alone would
+serve the first of two duplicates in one document without saying so, and would
+answer a bare `#id` shared by several documents with a plain miss. The
+single-id tools are `get_section_context`, `get_section_excerpt`,
+`describe_section`, `section_neighbors`, `get_section_path`,
+`get_section_descendants`, `get_section_summary`, `get_section_diff`,
+`get_related_sections` and `get_tutorial_path`. The batch tools are
+`get_sections`, `get_section_excerpts` and `get_section_summaries`. All of them
+add `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`,
+`anchor_candidates` (`id`, `doc_path`, `title` for each match) and a `warning`.
+A duplicate inside one document still serves the first match, so the shape is
+unchanged. A reference shared across documents is an error that says it is
+ambiguous and lists the candidates. The batch tools put the keys on the entry
+for that id and repeat `anchor_ambiguous` and `warning` at the top level of the
+response. One helper, `DocIndex.anchor_disclosure`, builds all of it. New keys
+only, absent on any unambiguous reference and on any stored section id.
+
+**The deletion preflight and the blast radius REFUSE a duplicate inside one
+document, where every other tool serves the first.** `check_section_delete_safe`
+and `get_section_blast_radius` answer for one section, and a verdict on the first
+of two same-named headings is a verdict on the wrong section half the time, with
+nothing in the response to say so. Both now return an `error` carrying the same
+keys and a `warning` that says nothing was analysed; a stored section id selects
+one. Anchor references have not shipped, so no existing caller sees this, and a
+stored id behaves as before. When they do resolve a reference, the response adds
+`resolved_section_id` naming the stored section the answer is about.
+
+**A reference is resolved to the stored id before any walk starts.**
+`get_section_descendants`, `section_neighbors`, `describe_section`,
+`get_related_sections`, `get_section_context(include_related=True)`, the
+deletion preflight and the blast radius all look up children, neighbours,
+relations and incoming anchored references by the stored id the reference
+resolved to, never by the caller's string. The `citation` blocks of
+`get_section` and `get_section_context` name the stored id too.
+
+### Fixed - the indexer and the link checker disagreed about anchors
+
+`_split_explicit_id` lived in the link checker and was used nowhere else.
+`parser/sections.py` had never heard of it, so the checker reported
+`doc.md#custom-id` as a live target while `get_section` could not resolve it —
+and the indexer slugified the braces INTO the id and left them verbatim in
+`title`, producing `...-the-partial-file-is-removed-ex-cache42#2`. An anchor did not merely
+go unhonoured; it corrupted both fields. The splitter now lives in the parser
+and both halves import it, and the persisted `anchor` is the namespace
+authority, with title-splitting kept as the legacy path so an index built before
+this version keeps validating without a reindex. The ids those headings had
+before stay resolvable as aliases.
+
+### Unchanged
+
+`INDEX_VERSION` stays at 3. The new fields are omit-when-empty and default on
+read, so an existing index loads unchanged and simply has no anchors until its
+next reindex — no forced reindex, per the 1.x contract. A document with no
+explicit ids indexes to byte-identical ids, pinned by a regression test. A
+document whose headings already carried a `{#...}` marker gets new primary ids
+on its next reindex; the earlier ids stay as aliases.
+
 ## [1.146.0] - 2026-10-14 - posting rows on disk, a lighter Read hook, index-file by stored root
 
 ### Added - the Stage-A posting index is stored on disk instead of rebuilt in every process

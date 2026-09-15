@@ -90,6 +90,7 @@ def _strip_mdx_plain(content: str) -> str:
 from .sections import (
     Section,
     slugify,
+    split_explicit_id,
     make_section_id,
     make_hierarchical_slug,
     compute_content_hash,
@@ -233,6 +234,14 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
     content_bytes = content.encode("utf-8")
     used_slugs: dict = {}
     slug_stack: list = []
+    # v1.147.0: two more slug chains, built the way earlier releases built them,
+    # so an anchored heading's descendants keep answering to the ids they had.
+    # `legacy_*` slugifies the raw title with its {#...} marker, as v1.146.0
+    # did; `plain_*` slugifies the marker-free title with no anchors applied.
+    legacy_used: dict = {}
+    legacy_stack: list = []
+    plain_used: dict = {}
+    plain_stack: list = []
     sections = []
 
     # State for the current open section
@@ -240,6 +249,10 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
     current_level: int = 0
     current_slug: str = ""
     current_byte_start: int = 0
+    # v1.147.0: author-written {#explicit-id} on the current heading, and the
+    # slugs this section answers to besides its own.
+    current_anchor: str = ""
+    current_alias_ids: list = []
 
     byte_cursor = 0
     # Byte offset where top-of-file frontmatter ends (#57): the root section's
@@ -251,9 +264,21 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
     # block_id is stamped at _finalize_section once the section_id is known.
     current_code_blocks: list = []
 
+    def _open_heading(raw_title: str, level: int) -> tuple:
+        """(title, anchor, slug, alias slugs) for a heading as written."""
+        title, explicit_id = split_explicit_id(raw_title)
+        anchor = explicit_id or ""
+        slug = make_hierarchical_slug(
+            title, level, slug_stack, used_slugs, explicit_id=anchor
+        )
+        legacy = make_hierarchical_slug(raw_title, level, legacy_stack, legacy_used)
+        plain = make_hierarchical_slug(title, level, plain_stack, plain_used)
+        aliases = [a for a in dict.fromkeys((legacy, plain)) if a != slug]
+        return title, anchor, slug, aliases
+
     def _finalize_section(byte_end: int) -> None:
         """Close the current open section and append it to sections."""
-        nonlocal current_slug, current_code_blocks
+        nonlocal current_slug, current_code_blocks, current_anchor, current_alias_ids
         # Derive the body from the byte range. Section starts and ends always
         # fall on line boundaries (the cursor advances by whole-line byte
         # lengths), so the slice is on a UTF-8 char boundary and decodes safely.
@@ -286,6 +311,11 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
             byte_end=byte_end,
             summary="",
             code_blocks=finalized_blocks,
+            anchor=current_anchor,
+            alias_ids=[
+                make_section_id(repo, doc_path, a, current_level)
+                for a in current_alias_ids
+            ],
         )
         sec.content_hash = compute_content_hash(body)
         # References, tags, and inline code come from a prose-only view: fenced
@@ -462,9 +492,10 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
             # Close the previous section where the heading paragraph began,
             # then open the setext section spanning the paragraph + underline.
             _finalize_section(byte_end=para_byte_start)
-            current_title = heading_text
             current_level = heading_level
-            current_slug = make_hierarchical_slug(heading_text, heading_level, slug_stack, used_slugs)
+            current_title, current_anchor, current_slug, current_alias_ids = (
+                _open_heading(heading_text, heading_level)
+            )
             current_byte_start = para_byte_start
             para_lines = []
             byte_cursor += line_bytes
@@ -474,9 +505,10 @@ def parse_markdown(content: str, doc_path: str, repo: str) -> list:
         atx_match = _ATX_RE.match(dedented)
         if atx_match:
             _finalize_section(byte_end=byte_cursor)
-            current_title = atx_match.group(2).strip()
             current_level = len(atx_match.group(1))
-            current_slug = make_hierarchical_slug(current_title, current_level, slug_stack, used_slugs)
+            current_title, current_anchor, current_slug, current_alias_ids = (
+                _open_heading(atx_match.group(2).strip(), current_level)
+            )
             current_byte_start = byte_cursor
             # ATX is not paragraph text; a following === is body, not a heading.
             para_lines = []

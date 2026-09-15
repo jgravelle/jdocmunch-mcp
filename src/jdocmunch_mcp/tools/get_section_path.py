@@ -47,11 +47,16 @@ def get_section_path(
         return {"error": f"Repo not found: {repo}"}
 
     target = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not target:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     chain: list[dict] = [target]
-    seen: set = {section_id}
+    seen: set = {target.get("id") or section_id}
     cur = target
     while True:
         parent_id = cur.get("parent_id")
@@ -67,7 +72,7 @@ def get_section_path(
     chain.reverse()  # root-first order.
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return {
+    out = {
         "section_id": section_id,
         "doc_path": target.get("doc_path", ""),
         "path": [_handle(s) for s in chain],
@@ -77,3 +82,6 @@ def get_section_path(
             "repo": f"{owner}/{name}",
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

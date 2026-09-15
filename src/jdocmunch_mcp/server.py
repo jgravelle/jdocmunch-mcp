@@ -410,7 +410,7 @@ def _all_tools() -> list[Tool]:
     return [
         Tool(
             name="index_local",
-            description="Index a local folder containing documentation files (.md, .txt, .rst; plus .pdf/.docx/.pptx/.epub when the optional [office] extra is installed — converted to Markdown locally). Parses by heading hierarchy into sections for efficient retrieval. An already-indexed source is recognized before storage is chosen: the established handle is reused (or refreshed), an explicit conflicting name returns a conflict instead of creating a duplicate index, and multiple equivalent legacy indexes return bounded ambiguity. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Coverage: `coverage_complete` answers 'did I get everything', with `skip_counts` / `skipped_paths` naming what was dropped and why; `truncated` answers ONLY the max_files cap and is false when a file was dropped for any other reason. Files over the per-file size cap (5MB default, JDOCMUNCH_MAX_FILE_SIZE) are reported under skip_counts.oversize. Response includes a `changes` list with one {doc_path, status: new|changed|deleted, mtime} entry per file, sorted newest first and capped at 50 entries, useful for a 'recently edited' map at session start. `changes_total` is the uncapped count and `changes_truncated` is true when entries were dropped. Deleted files sort last, so the cap drops them first: the `new`/`changed`/`deleted` count fields are the authority, not the length of `changes`.",
+            description="Index a local folder containing documentation files (.md, .txt, .rst; plus .pdf/.docx/.pptx/.epub when the optional [office] extra is installed — converted to Markdown locally). Parses by heading hierarchy into sections for efficient retrieval. An already-indexed source is recognized before storage is chosen: the established handle is reused (or refreshed), an explicit conflicting name returns a conflict instead of creating a duplicate index, and multiple equivalent legacy indexes return bounded ambiguity. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Coverage: `coverage_complete` answers 'did I get everything', with `skip_counts` / `skipped_paths` naming what was dropped and why; `truncated` answers ONLY the max_files cap and is false when a file was dropped for any other reason. Files over the per-file size cap (5MB default, JDOCMUNCH_MAX_FILE_SIZE) are reported under skip_counts.oversize. Response includes a `changes` list with one {doc_path, status: new|changed|deleted, mtime} entry per file, sorted newest first and capped at 50 entries, useful for a 'recently edited' map at session start. `changes_total` is the uncapped count and `changes_truncated` is true when entries were dropped. Deleted files sort last, so the cap drops them first: the `new`/`changed`/`deleted` count fields are the authority, not the length of `changes`. v1.147+ — a response that indexes the folder or finds nothing to change returns `duplicate_anchors` (empty when none) and `duplicate_anchor_warning` for explicit `{#id}` headings written twice in one document.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -489,7 +489,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="doc_index_repo",
-            description="Index a GitHub repository's documentation. Fetches .md/.txt files, parses sections, and saves to local storage. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Indexes .md and .txt only; every other file in the repo is ignored. Returns `changes` on every success path (at most 50 entries, newest first) with `changes_total` and `changes_truncated` beside it; the new/changed/deleted counts are the authority, not len(changes). Each entry's `mtime` is the head COMMIT date, offset-aware (e.g. 2026-09-20T13:15:39+00:00), because a repository has no per-file modification time. index_local's `mtime` is naive local time instead, so read the offset before comparing times across the two.",
+            description="Index a GitHub repository's documentation. Fetches .md/.txt files, parses sections, and saves to local storage. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Indexes .md and .txt only; every other file in the repo is ignored. Returns `changes` on every success path (at most 50 entries, newest first) with `changes_total` and `changes_truncated` beside it; the new/changed/deleted counts are the authority, not len(changes). Each entry's `mtime` is the head COMMIT date, offset-aware (e.g. 2026-09-20T13:15:39+00:00), because a repository has no per-file modification time. index_local's `mtime` is naive local time instead, so read the offset before comparing times across the two. v1.147+ — every success response returns `duplicate_anchors` (empty when none) and `duplicate_anchor_warning` for explicit `{#id}` headings written twice in one document.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -816,7 +816,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Section ID from get_toc, search_sections, or get_document_outline"
+                        "description": "Section ID from get_toc, search_sections, or get_document_outline. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous reference sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `sections` and `warning`."
                     },
                     "verify": {
                         "type": "boolean",
@@ -850,7 +850,7 @@ def _all_tools() -> list[Tool]:
                     "section_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of section IDs to retrieve"
+                        "description": "List of section IDs to retrieve. v1.147+ — an entry may be a `doc.md#anchor` reference; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning` on its entry and at top level."
                     },
                     "verify": {
                         "type": "boolean",
@@ -883,7 +883,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID from get_toc, search_sections, etc."
+                        "description": "Target section ID from get_toc, search_sections, etc. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous reference sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     },
                     "max_tokens": {
                         "type": "integer",
@@ -921,7 +921,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID"
+                        "description": "Target section ID. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     }
                 },
                 "required": ["repo", "section_id"]
@@ -939,7 +939,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID from get_toc, search_sections, etc."
+                        "description": "Target section ID from get_toc, search_sections, etc. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     }
                 },
                 "required": ["repo", "section_id"]
@@ -1026,7 +1026,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section. Its descendants are returned; target itself is not included."
+                        "description": "Target section. Its descendants are returned; target itself is not included. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     },
                     "max_depth": {
                         "type": "integer",
@@ -1050,7 +1050,7 @@ def _all_tools() -> list[Tool]:
                     "section_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of section IDs. Order preserved; each entry carries `requested_id` for correlation."
+                        "description": "List of section IDs. Order preserved; each entry carries `requested_id` for correlation. v1.147+ — an entry may be a `doc.md#anchor` reference; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning` on its entry and at top level."
                     },
                     "max_bytes": {
                         "type": "integer",
@@ -1073,7 +1073,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID"
+                        "description": "Target section ID. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous reference sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     },
                     "max_bytes": {
                         "type": "integer",
@@ -1096,7 +1096,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID from get_toc, search_sections, etc."
+                        "description": "Target section ID from get_toc, search_sections, etc. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     }
                 },
                 "required": ["repo", "section_id"]
@@ -1133,7 +1133,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "Target section ID from get_toc, search_sections, etc."
+                        "description": "Target section ID from get_toc, search_sections, etc. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
                     }
                 },
                 "required": ["repo", "section_id"]
@@ -1152,7 +1152,7 @@ def _all_tools() -> list[Tool]:
                     "section_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of section IDs to look up. Order preserved in response; each entry carries `requested_id` for correlation."
+                        "description": "List of section IDs to look up. Order preserved in response; each entry carries `requested_id` for correlation. v1.147+ — an entry may be a `doc.md#anchor` reference; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning` on its entry and at top level."
                     }
                 },
                 "required": ["repo", "section_ids"]
@@ -1615,7 +1615,10 @@ def _all_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "repo": {"type": "string"},
-                    "section_id": {"type": "string"},
+                    "section_id": {
+                        "type": "string",
+                        "description": "Target section ID. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
+                    },
                     "mode": {"type": "string", "enum": ["structural", "semantic", "both"], "default": "both"},
                     "top_n": {"type": "integer", "default": 5},
                     "min_score": {"type": "number", "default": 0.6},
@@ -1635,7 +1638,10 @@ def _all_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "repo": {"type": "string"},
-                    "section_id": {"type": "string"}
+                    "section_id": {
+                        "type": "string",
+                        "description": "Target section ID. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
+                    }
                 },
                 "required": ["repo", "section_id"]
             }
@@ -1747,7 +1753,10 @@ def _all_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "repo": {"type": "string"},
-                    "section_id": {"type": "string"}
+                    "section_id": {
+                        "type": "string",
+                        "description": "Target section ID. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`; an ambiguous one sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`."
+                    }
                 },
                 "required": ["repo", "section_id"]
             }
@@ -1939,7 +1948,7 @@ def _all_tools() -> list[Tool]:
                     "repo": {"type": "string"},
                     "section_id": {
                         "type": "string",
-                        "description": "Stable section ID, format owner/repo::doc_path::slug#level"
+                        "description": "Stable section ID, format owner/repo::doc_path::slug#level. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`. An ambiguous one is REFUSED (an `error` that sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`), because the answer covers one section: pass a section id."
                     },
                     "max_depth": {
                         "type": "integer",
@@ -1966,7 +1975,7 @@ def _all_tools() -> list[Tool]:
                     "repo": {"type": "string"},
                     "section_id": {
                         "type": "string",
-                        "description": "Stable section ID, format owner/repo::doc_path::slug#level"
+                        "description": "Stable section ID, format owner/repo::doc_path::slug#level. v1.147+ — also accepts a `doc.md#anchor` reference to a heading written with an explicit `{#id}`. An ambiguous one is REFUSED (an `error` that sets `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`, `anchor_candidates` and `warning`), because the answer covers one section: pass a section id."
                     },
                     "transitive_depth": {
                         "type": "integer",

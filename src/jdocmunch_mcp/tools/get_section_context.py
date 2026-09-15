@@ -43,7 +43,12 @@ def get_section_context(
         return {"error": f"Repo not found: {repo}"}
 
     sec = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not sec:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     # --- Ancestor chain (root → parent) ---
@@ -109,7 +114,7 @@ def get_section_context(
 
         rel = get_related(
             index.sections,
-            section_id,
+            sec["id"],
             mode="both" if index._has_embeddings() else "structural",
             top_n=5,
             min_score=0.55,
@@ -169,10 +174,12 @@ def get_section_context(
     out["_meta"]["citation"] = {
         "repo": f"{owner}/{name}",
         "doc_path": sec.get("doc_path", ""),
-        "section_id": section_id,
+        "section_id": sec.get("id") or section_id,
         "byte_start": int(sec.get("byte_start", 0) or 0),
         "byte_end": int(sec.get("byte_end", 0) or 0),
         "content_hash": sec.get("content_hash", ""),
         "indexed_at": index.indexed_at,
     }
+    if disclosure:
+        out.update(disclosure)
     return out

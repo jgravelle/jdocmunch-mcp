@@ -42,7 +42,12 @@ def get_section_summary(
         return {"error": f"Repo not found: {repo}"}
 
     sec = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not sec:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     # Strip content + raw embedding (issue #11). Everything else passes through.
@@ -53,7 +58,7 @@ def get_section_summary(
     summary_view["byte_length"] = max(0, byte_end - byte_start)
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return {
+    out = {
         "section": summary_view,
         "_meta": {
             "latency_ms": latency_ms,
@@ -61,3 +66,6 @@ def get_section_summary(
             "indexed_at": index.indexed_at,
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

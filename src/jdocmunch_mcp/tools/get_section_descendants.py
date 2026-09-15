@@ -54,8 +54,16 @@ def get_section_descendants(
         return {"error": f"Repo not found: {repo}"}
 
     target = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not target:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
+    # The subtree is walked by STORED id; the caller's string may be an anchor
+    # reference or an alias, which no section lists as its parent.
+    tid = target.get("id") or section_id
 
     # Build parent_id → [children] index once so the BFS is O(N).
     children_by_parent: dict = {}
@@ -69,9 +77,9 @@ def get_section_descendants(
         kids.sort(key=lambda s: s.get("byte_start", 0) or 0)
 
     descendants: list[dict] = []
-    visited: set = {section_id}
+    visited: set = {tid}
     # BFS queue carries (section_id, depth_from_target).
-    queue: list = [(section_id, 0)]
+    queue: list = [(tid, 0)]
     while queue:
         sid, depth = queue.pop(0)
         if max_depth is not None and depth >= max_depth:
@@ -99,7 +107,7 @@ def get_section_descendants(
     ))
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return {
+    out = {
         "section_id": section_id,
         "doc_path": target.get("doc_path", ""),
         "descendants": descendants,
@@ -110,3 +118,6 @@ def get_section_descendants(
             "repo": f"{owner}/{name}",
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out
