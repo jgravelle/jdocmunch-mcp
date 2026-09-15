@@ -345,6 +345,16 @@ Set `JDOCMUNCH_LAUNCH_ID` (or the suite-generic `MUNCH_LAUNCH_ID`) in the server
 
 ---
 
+## Superseded-Server Disclosure
+
+A long-lived server cannot restart itself. When the code on disk has moved past the code this process loaded, tool responses carry `server_build_stale`; the key is absent otherwise. It is always returned top-level, and also in `_meta` when `JDOCMUNCH_META_FIELDS` keeps it (`all`, or a list naming `server_build_stale`).
+
+Keys: `stale` (always `true`), `running_version`, `installed_version` (when the on-disk version is readable), `reasons` (`version_changed` and/or `files_changed`), `changed_paths` (with `files_changed`), and `action`. Restart the client session to load the new build.
+
+`JDOCMUNCH_DISABLE_STALENESS_CHECK` set to any non-empty value (for example `1`) turns the check off. The result is cached for 5 seconds.
+
+---
+
 ## Troubleshooting
 
 **"Repo not found"**

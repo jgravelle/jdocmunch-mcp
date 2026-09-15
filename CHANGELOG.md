@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Added - every tool response says when the server is running superseded code
+
+New response key `server_build_stale`, returned top-level on every tool response
+when it applies, and in `_meta` where the caller's `meta_fields` keeps it.
+
+An MCP stdio server cannot restart itself and cannot ask to be restarted: the
+client owns the process lifecycle, the tool-list-changed notification re-fetches
+the tool LIST rather than reloading Python, a server that exits is reported as a
+failed connection and not respawned, and `os.execv` keeps the file descriptors
+but not the completed `initialize` handshake. So the design is DETECT AND
+DISCLOSE, never self-restart.
+
+Two signals, both in `runtime_staleness`: the version in the on-disk
+`.dist-info/METADATA` against the version this process loaded
+(`__version__` is resolved once and kept), and the mtimes of `__init__.py` and
+`server.py` against the time the process started (the OS value on Windows and
+Linux, otherwise the time the server module loaded), with two seconds of slack
+because the Linux value can read up to a second early. The key is absent when
+neither fires, so the response shape is unchanged for everyone unaffected.
+
+- The default config strips `_meta`, so the top-level key is the one a default
+  caller receives; the `_meta` copy is added only when `meta_fields` keeps it.
+- The package DIRECTORY's mtime is deliberately not watched: Python writes
+  `__pycache__/` there on first import after an install, so watching it would
+  flag every freshly started server.
+- A reinstall that hardlinks from a cache can leave a file's mtime older than
+  the process, so the mtime signal can miss it; the version signal still
+  catches a version change.
+- **A VERSION MATCH IS NOT PROOF THE INSTALL TOOK.** A reinstall can fail to
+  replace the console-script shim, which Windows locks while a process runs;
+  `--version` then reports the new number while the shim starts the old entry
+  point. That is not detected here. When an install appears to have had no
+  effect, check the entry point, not the version.
+
+Cached 5 s; `JDOCMUNCH_DISABLE_STALENESS_CHECK` set to any non-empty value
+turns it off; the probe never raises, and logs a warning the first time it fails
+in a process. Documented in `USER_GUIDE.md`.
+
 ## [1.146.0] - 2026-10-14 - posting rows on disk, a lighter Read hook, index-file by stored root
 
 ### Added - the Stage-A posting index is stored on disk instead of rebuilt in every process

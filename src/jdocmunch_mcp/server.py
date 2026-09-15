@@ -15,6 +15,9 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import Tool, ToolAnnotations, TextContent, Resource
 
 from . import runtime_identity
+# Imported at server load, not on the first tool call: where the platform gives
+# no OS process start, its import time is the load time it compares files to.
+from . import runtime_staleness as _runtime_staleness
 from .tools.index_local import index_local
 from .tools.index_repo import index_repo
 from .tools.list_repos import list_repos
@@ -2803,6 +2806,25 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 from .tools import _arg_contract as _ac2
                 _ac2.disclose(result, _ignored_args)
                 result.setdefault("_meta", {})["ignored_arguments"] = _ignored_args
+        except Exception:
+            pass
+
+        # v1.147.0: a long-lived server cannot restart itself, so it says when
+        # the disk has moved past it. Attached AFTER meta_fields filtering, like
+        # the blocks above, because the default config has already stripped
+        # `_meta`: the TOP-LEVEL key is what the default caller receives. The
+        # `_meta` copy follows the caller's config and is added only when
+        # `meta_fields` keeps it, so the default does not get a `_meta` back.
+        # Never allowed to fail a call.
+        try:
+            if isinstance(result, dict):
+                _sr = _runtime_staleness.staleness_report()
+                if _sr:
+                    result["server_build_stale"] = _sr
+                    from .config import get_meta_fields as _gmf
+                    _mf = _gmf()
+                    if _mf is None or "server_build_stale" in _mf:
+                        result.setdefault("_meta", {})["server_build_stale"] = _sr
         except Exception:
             pass
 
