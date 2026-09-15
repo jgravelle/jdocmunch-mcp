@@ -36,7 +36,7 @@ fastembed = ["fastembed>=0.8.0"]
 office = ["markitdown[pdf,docx,pptx]>=0.1.6"]
 
 [project.scripts]
-jdocmunch-mcp = "jdocmunch_mcp.server:main"
+jdocmunch-mcp = "jdocmunch_mcp.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

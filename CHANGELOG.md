@@ -86,6 +86,31 @@ turns the sidecar off. The stored `bm25_stats` block gains
 
 `tests/test_posting_sidecar.py` (56).
 
+### Changed - the console script and `python -m jdocmunch_mcp` no longer import the MCP SDK
+
+`pyproject`'s `jdocmunch-mcp` entry point moved from `jdocmunch_mcp.server:main`
+to `jdocmunch_mcp.cli.main:main`. The argparse tree now lives in a module whose
+module-level imports are stdlib only, so `serve` is the one branch that reaches
+`..server` and with it the SDK.
+
+`src/jdocmunch_mcp/__main__.py` dispatches through `cli.main:main` too. It
+imported `.server` before, so `python -m jdocmunch_mcp` -- the command the
+watch login service runs -- loaded the SDK on exactly the path the console
+script no longer did. `tests/test_main_module_entry.py` runs a real `-m`
+subprocess and fails if an SDK module is imported.
+
+⚠ `asyncio` is NOT at module scope: only `serve` and `watch` use it. ⚠
+`--version` is a custom lazy `argparse.Action`: the built-in one interpolates
+its string at `add_argument` time, which resolves `__version__` on every
+invocation. It prints to stdout and exits 0, matching the built-in --
+`parser.exit(message=...)` writes to STDERR and would have silently broken
+anyone piping `jdocmunch-mcp --version`.
+
+`from jdocmunch_mcp.server import main` keeps working, along with
+`_force_utf8_stdio` and `_load_paths_from_arg`, per the 1.x contract.
+`tests/test_cli_import_cost.py` ratchets the shape rather than the timing, so a
+stray top-level import fails the suite.
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)

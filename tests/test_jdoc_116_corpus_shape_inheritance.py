@@ -174,7 +174,11 @@ class TestCliCanExpressIt:
         from jdocmunch_mcp import server
         parser = server._build_arg_parser() if hasattr(server, "_build_arg_parser") else None
         if parser is None:
-            src = Path(server.__file__).read_text(encoding="utf-8")
+            # The argparse tree moved to cli/main.py so the console script
+            # stops importing the MCP SDK on every hook fire. server.py
+            # re-exports main(); the FLAGS live there now.
+            from jdocmunch_mcp.cli import main as cli_main
+            src = Path(cli_main.__file__).read_text(encoding="utf-8")
             assert '"--extra-ignore-pattern"' in src
             assert '"--no-extra-ignore-patterns"' in src
             return
@@ -183,6 +187,6 @@ class TestCliCanExpressIt:
     def test_dispatch_maps_the_clear_flag_to_empty_list(self):
         """--no-extra-ignore-patterns must send [], not None, or it would mean
         'inherit' and do the opposite of what its name promises."""
-        from jdocmunch_mcp import server
-        src = Path(server.__file__).read_text(encoding="utf-8")
+        from jdocmunch_mcp.cli import main as cli_main
+        src = Path(cli_main.__file__).read_text(encoding="utf-8")
         assert "[] if getattr(args, \"no_extra_ignore_patterns\", False)" in src
