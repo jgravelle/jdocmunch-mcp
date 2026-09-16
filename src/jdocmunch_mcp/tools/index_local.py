@@ -2634,6 +2634,33 @@ def index_local(
                 try:
                     reloaded = store.load_index(owner, repo_name)
                     _loader = getattr(reloaded, "_content_loader", None) if reloaded else None
+                    # ⚠ The index's loader opens the file once PER SECTION. The
+                    # stats pass no longer fills the sink when the posting rows
+                    # cover the kept sections (it reads nothing then), so this is
+                    # the only pass left that reads kept bodies, and it is the
+                    # per-section `open` storm #142 removed. One document at a
+                    # time, because a document's sections are contiguous.
+                    _held: dict = {}
+
+                    def _kept_body(doc_path: str, start: int, end: int) -> str:
+                        if not doc_path or end <= start:
+                            return ""
+                        if doc_path not in _held:
+                            _held.clear()
+                            data = None
+                            try:
+                                fp = store._safe_content_path(
+                                    store._content_dir(owner, repo_name), doc_path)
+                                if fp:
+                                    with open(fp, "rb") as fh:
+                                        data = fh.read()
+                            except OSError:
+                                data = None
+                            _held[doc_path] = data
+                        data = _held[doc_path]
+                        if data is None:
+                            return ""
+                        return data[start:end].decode("utf-8", errors="replace")
 
                     def _content_for(sec: dict) -> str:
                         buf = raw_subset.get(sec.get("doc_path", ""))
@@ -2650,7 +2677,7 @@ def index_local(
                         if _loader is None:
                             return ""
                         try:
-                            return _loader(sec.get("doc_path", ""), start, end) or ""
+                            return _kept_body(sec.get("doc_path", ""), start, end) or ""
                         except Exception:
                             return ""
 

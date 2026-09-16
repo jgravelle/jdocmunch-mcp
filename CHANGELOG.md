@@ -2,6 +2,90 @@
 
 ## [Unreleased]
 
+### Added - the Stage-A posting index is stored on disk instead of rebuilt in every process
+
+`PostingIndex.build` re-read and re-tokenized every section body on the first
+search of every process, then threw the result away at exit. The save that
+produced the index had already done the same tokenization for
+`compute_corpus_stats`, so the work was paid twice and kept neither time.
+
+A new `<name>.postings.jsonl` sidecar keeps it. One row per section,
+`[section_id, row_key, dl_title, dl_summary, dl_content, [term_ids]]`, and the
+term strings once, in a vocabulary on the header line.
+
+Measured with `benchmarks/posting_rows/measure.py` on this repository at
+v1.145.3 (`git archive`, 14,588 sections), Windows, Python 3.12. Each time is
+the median of 9 fresh processes, with 0 failed runs; the sizes are read once
+after the full index. The full record, with each range, is
+`benchmarks/posting_rows/results.json`.
+
+    first search, sidecar present                     436 ms
+    first search, JDOCMUNCH_POSTING_CACHE=0         2,218 ms
+    incremental save, statistics from rows          4,414 ms
+    incremental save, statistics from every body    4,344 ms
+    sidecar / index file                   2.87 MB / 11.07 MB
+
+The first search is where the change pays. The incremental figures are the
+whole `index_local` call after a one-file edit; their ranges overlap, so this
+corpus shows no measurable difference there.
+
+⚠⚠ **The encoding is the design.** Section ids appear once each and term
+strings once each. The same postings written with full section-id strings
+measure 15.97 MB, 5.6x the sidecar. Rows, not postings, are stored because a
+row can be checked and replaced one section at a time.
+
+⚠⚠ **A stale posting sidecar returns wrong results silently, where
+rebuilding every time was merely slow, so the file is given no authority of
+its own.** Every row carries `sha256(title \0 summary \0 content_hash)` and
+is used only when that key equals the key recomputed from the LIVE section.
+One rule covers a torn write, an index updated by something that does not
+maintain the sidecar, rows for deleted sections, and duplicate or
+out-of-order rows: each costs a rebuild of exactly the sections that moved.
+
+⚠ Two inputs a content key cannot see, both failed CLOSED. The tokenizer is
+identified by a hash of `retrieval/tokenize.py`'s SOURCE, so a stop-word
+tweak invalidates the file without anyone bumping a constant. And a row
+whose body came back EMPTY while its `content_hash` says otherwise is never
+persisted, since caching a body we could not read would freeze that section
+behind a key that stays valid. A genuinely empty section hashes to
+`sha256("")` and persists.
+
+⚠ **An absent, corrupt or foreign sidecar degrades to a rebuild, never to
+an error.** The file is decoded one line at a time and every field is
+type-checked, so a byte that is not UTF-8 or a malformed row costs that row,
+and a malformed header or vocabulary costs the file. Tests write each case
+and run a search and an incremental save over a damaged file.
+
+**The statistics stay exact on every save.** A full index derives `bm25_stats`
+from the rows it builds. An incremental save reuses every row that still keys
+to its section, reads and tokenizes only the sections that changed, and
+derives the statistics from the result. With no usable sidecar it tokenizes
+every section, as before. Every save that builds rows writes them, so a
+missing sidecar is back after the next save. The stored block also records
+which tokenizer counted it, in `bm25_stats.stats_tokenizer`.
+
+⚠ `bm25.cap_df` is now the ONE producer of a capped `df` block, shared by
+both paths, and its tie-break is the term rather than insertion order. Terms
+arrive from a `set`, so the previous cap kept a different set of
+equally-frequent terms at the boundary from run to run under
+PYTHONHASHSEED, and in an order that followed the sections, so a full and an
+incremental build of the same files could keep different terms. Counts were
+never affected.
+
+⚠ With rows on disk the statistics pass reads no kept bodies, so it no
+longer fills the content sink the derived-sidecar rebuild in `index_local`
+relies on (#142). That rebuild now reads each kept document itself, whole and
+once, and slices its sections from it. Falling back to the index's
+per-section loader would bring back the one-`open`-per-section cost #142
+removed; `test_stats_pass_opens_each_kept_file_once` pins it.
+
+**What changes for a caller.** One new index-owned file,
+`<name>.postings.jsonl`, deleted with the index. `JDOCMUNCH_POSTING_CACHE=0`
+turns the sidecar off. The stored `bm25_stats` block gains
+`stats_tokenizer`. No tool, response key or `INDEX_VERSION` change.
+
+`tests/test_posting_sidecar.py` (56).
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)

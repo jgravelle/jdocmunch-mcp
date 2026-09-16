@@ -1,0 +1,55 @@
+{
+  "measured_at": "2026-10-14T16:29:47+00:00",
+  "corpus": "jdocmunch-mcp v1.145.3 (git archive)",
+  "sections": 14588,
+  "edit_target": "README.md",
+  "query": "install configuration",
+  "python": "3.12.13",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "sizes": {
+    "index_monolith_bytes": 11068426,
+    "posting_sidecar_bytes": 2866850,
+    "terms": 6370,
+    "posting_entries": 116354,
+    "postings_full_id_bytes": 15965510,
+    "postings_integer_id_bytes": 649946
+  },
+  "cold_search": {
+    "sidecar": {
+      "runs": 9,
+      "failed": 0,
+      "median_ms": 436.0,
+      "min_ms": 316.3,
+      "max_ms": 836.5,
+      "source": [
+        "sidecar"
+      ]
+    },
+    "no_sidecar": {
+      "runs": 9,
+      "failed": 0,
+      "median_ms": 2217.6,
+      "min_ms": 1758.0,
+      "max_ms": 3333.0,
+      "source": [
+        "rebuild"
+      ]
+    }
+  },
+  "incremental_save": {
+    "recompute": {
+      "runs": 9,
+      "failed": 0,
+      "median_ms": 4344.1,
+      "min_ms": 3921.6,
+      "max_ms": 4685.4
+    },
+    "rows": {
+      "runs": 9,
+      "failed": 0,
+      "median_ms": 4413.8,
+      "min_ms": 3622.4,
+      "max_ms": 4820.6
+    }
+  }
+}

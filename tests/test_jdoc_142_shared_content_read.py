@@ -148,4 +148,9 @@ def test_stats_equal_the_per_section_loader_on_multibyte_text(tmp_path, monkeypa
     s = _ds.DocStore(base_path=str(store))
     index = s.load_index("local", "c142")
     reference = compute_corpus_stats(index.sections, content_loader=index._content_loader)
-    assert index.bm25_stats == reference
+    # v1.146.0: the saved block also records which tokenizer counted it;
+    # `reference` is the bare statistics. Compare those, and check the stamp.
+    from jdocmunch_mcp.retrieval.posting_cache import tokenizer_identity
+    stored = dict(index.bm25_stats)
+    assert stored.pop("stats_tokenizer") == tokenizer_identity()
+    assert stored == reference

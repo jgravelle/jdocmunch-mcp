@@ -378,12 +378,22 @@ Indexes are stored at `~/.doc-index/` (override with the `DOC_INDEX_PATH` enviro
 ~/.doc-index/
 ├── {owner}/
 │   ├── {name}.json       # Index metadata + section metadata (no content)
+│   ├── {name}.postings.jsonl  # Per-section term rows for the first search (v1.146+)
 │   └── {name}/           # Raw doc files for byte-range content reads
 │       ├── README.md
 │       └── docs/
 │           └── guide.md
 └── _savings.json         # Cumulative token savings counter
 ```
+
+`{name}.postings.jsonl` stores each section's terms, so the first query in a
+new server process does not re-read every document, and an incremental save
+re-tokenizes only the sections that changed. The BM25 statistics are
+recomputed exactly on every save either way, and the index file records the
+tokenizer that counted them in `bm25_stats.stats_tokenizer`. The file is a
+cache: a row is used only while it matches its section, and a missing or
+damaged file means a slower first query, never a wrong one. Set
+`JDOCMUNCH_POSTING_CACHE=0` to neither read nor write it.
 
 ---
 

@@ -153,12 +153,17 @@ def test_qa07_failed_save_preserves_record(tmp_path, monkeypatch):
     ds = _begin_pair_retirement(store)
     before = ds._index_path("local", "old").read_bytes()
 
-    from jdocmunch_mcp.retrieval import bm25
+    from jdocmunch_mcp.retrieval import bm25, posting_cache
 
-    def fail_before_write(_sections):
+    def fail_before_write(*_args, **_kwargs):
         raise OSError("injected save failure")
 
+    # v1.146.0: save_index derives the stats block from the posting rows when
+    # the row cache is on and from compute_corpus_stats when it is not. Both
+    # seams are blocked so this stays an assertion about what a FAILED SAVE
+    # leaves behind, not about which producer happens to run.
     monkeypatch.setattr(bm25, "compute_corpus_stats", fail_before_write)
+    monkeypatch.setattr(posting_cache.RowSet, "build", fail_before_write)
     with pytest.raises(OSError):
         ds.save_index(
             "local", "old",

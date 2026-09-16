@@ -56,12 +56,19 @@ class PostingIndex:
     cached on the index. Idempotent rebuild — pass ``force=True`` to discard.
     """
 
-    __slots__ = ("postings", "all_section_ids")
+    __slots__ = ("postings", "all_section_ids", "source", "rows_reused",
+                 "rows_built")
 
     def __init__(self) -> None:
         self.postings: dict[str, set[str]] = {}
         # Fallback: every section ID, used when query has no in-vocab terms.
         self.all_section_ids: list[str] = []
+        # Provenance, so a session can tell a sidecar hit from a rebuild
+        # instead of inferring it from a stopwatch: "sidecar" (some rows came
+        # off disk) or "rebuild" (every section was tokenized here).
+        self.source: str = "rebuild"
+        self.rows_reused: int = 0
+        self.rows_built: int = 0
 
     @classmethod
     def build(cls, sections: list, content_loader=None) -> "PostingIndex":
@@ -165,13 +172,39 @@ def get_or_build(index, content_loader=None) -> PostingIndex:
 
     Keyed by ``id(index.sections)``: if the underlying section list is
     replaced (e.g. during a re-index), the cache is rebuilt automatically.
+
+    v1.146.0: when the index points at a ``<name>.postings.jsonl`` sidecar,
+    the per-section term rows are read from it instead of being re-derived
+    from every body (``benchmarks/posting_rows/results.json`` measures the
+    first search both ways). ⚠ Each row is served only if it still keys
+    to its live section, so a sidecar that has fallen behind costs a rebuild
+    of exactly the sections that moved — never a wrong posting list. See
+    ``retrieval/posting_cache.py``.
     """
     cache_key = id(index.sections)
     cached = getattr(index, "_posting_index", None)
     cached_key = getattr(index, "_posting_index_key", None)
     if cached is not None and cached_key == cache_key:
         return cached
-    posting = PostingIndex.build(index.sections, content_loader=content_loader)
+
+    posting = None
+    sidecar = getattr(index, "_postings_sidecar", None)
+    if sidecar:
+        from . import posting_cache
+
+        rows = posting_cache.load_path(sidecar)
+        if rows is not None:
+            rows = posting_cache.RowSet.build(
+                index.sections, content_loader=content_loader, reuse=rows
+            )
+            posting = rows.posting_index(index.sections)
+            posting.source = "sidecar" if rows.reused else "rebuild"
+            posting.rows_reused = rows.reused
+            posting.rows_built = rows.built
+
+    if posting is None:
+        posting = PostingIndex.build(index.sections, content_loader=content_loader)
+        posting.rows_built = len(posting.all_section_ids)
     index._posting_index = posting
     index._posting_index_key = cache_key
     return posting

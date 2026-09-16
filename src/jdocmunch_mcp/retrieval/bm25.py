@@ -49,6 +49,28 @@ HEADING_PATH_WEIGHT = 0.5
 DF_TOP_K = 5000
 
 
+def cap_df(df: dict) -> dict:
+    """Trim ``df`` to the ``DF_TOP_K`` most frequent terms, deterministically.
+
+    ⚠⚠ The ONE producer of a capped df block, shared by ``compute_corpus_stats``
+    and by ``posting_cache.RowSet.corpus_stats``. Two paths that cap the same
+    counts differently would disagree about which terms survive the boundary,
+    and the difference would show up only as a ranking change on rare terms --
+    the hardest kind of drift to attribute.
+
+    ⚠ The tie-break is the TERM, not insertion order. Terms arrive from a
+    ``set`` iteration, whose order follows string hashes and therefore
+    PYTHONHASHSEED, so the previous ``sorted(..., reverse=True)`` over a
+    dict built that way chose a different boundary set from run to run on the
+    same corpus. Counts were never affected -- only which equally-frequent
+    terms made the cut.
+    """
+    if len(df) <= DF_TOP_K:
+        return df
+    top = sorted(df.items(), key=lambda kv: (-kv[1], kv[0]))[:DF_TOP_K]
+    return dict(top)
+
+
 def _k1() -> float:
     try:
         return float(os.environ.get("JDOCMUNCH_BM25_K1", "1.2"))
@@ -163,10 +185,8 @@ def compute_corpus_stats(sections: list, content_loader=None) -> dict:
         for term in all_terms:
             df[term] = df.get(term, 0) + 1
 
-    # Cap df: keep the top K by frequency.
-    if len(df) > DF_TOP_K:
-        top = sorted(df.items(), key=lambda kv: kv[1], reverse=True)[:DF_TOP_K]
-        df = dict(top)
+    # Cap df: keep the top K by frequency (see cap_df for the tie-break).
+    df = cap_df(df)
 
     def _avg(xs: list[int]) -> float:
         return sum(xs) / len(xs) if xs else 0.0

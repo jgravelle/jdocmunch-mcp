@@ -66,6 +66,7 @@ INDEX_OWNED_SIDECAR_SUFFIXES = (
     ".related.json",
     ".boilerplate.json",
     ".duplicates.json",
+    ".postings.jsonl",
 )
 
 # The subset that `list_repos`'s `*/*.json` glob can actually match, so the
@@ -468,6 +469,11 @@ class DocIndex:
         # the section dicts the first time a semantic code path needs them.
         self._embeddings_sidecar = None
         self._embeddings_rehydrated = False
+        # v1.146.0: path to the ``<name>.postings.jsonl`` row cache, injected by
+        # DocStore.load_index. None (the default here) means "no sidecar to
+        # consult" — a DocIndex built directly in memory rebuilds its posting
+        # index exactly as it always has.
+        self._postings_sidecar = None
 
     @property
     def repo_at_sha(self) -> Optional[str]:
@@ -1354,8 +1360,23 @@ class DocStore:
 
         # Compute BM25 corpus stats from the in-memory Section objects (which
         # carry full content) before to_dict() drops it.
-        from ..retrieval.bm25 import compute_corpus_stats
-        bm25_stats = compute_corpus_stats(sections)
+        #
+        # v1.146.0: the tokenization this needs is the SAME tokenization the
+        # Stage-A posting index needs, and the two used to be run separately —
+        # once here and once again on the first search of every process. One
+        # pass now produces both: the rows are persisted beside the monolith
+        # and the stats block is derived from them. `posting_rows` is None only
+        # when the cache is switched off, in which case nothing changes.
+        from ..retrieval import posting_cache
+        posting_rows = None
+        if posting_cache.enabled():
+            posting_rows = posting_cache.RowSet.build(sections)
+            bm25_stats = posting_rows.corpus_stats()
+        else:
+            from ..retrieval.bm25 import compute_corpus_stats
+            bm25_stats = compute_corpus_stats(sections)
+        # Provenance: which tokenizer counted this block.
+        bm25_stats["stats_tokenizer"] = posting_cache.tokenizer_identity()
 
         index = DocIndex(
             repo=f"{owner}/{name}",
@@ -1402,6 +1423,8 @@ class DocStore:
         self._cancel_pending_retirement(owner, name)
         _evict_index_cache(index_path)
         self._write_summary(owner, name, index)  # jdoc#77
+        if posting_rows is not None:
+            posting_cache.write(str(self.base_path), owner, name, posting_rows)
 
         # Cache the indexed content mirror for byte-range reads. NB these are
         # the *preprocessed* strings (transformed formats like .json/.jsonc/.svg
@@ -1570,6 +1593,23 @@ class DocStore:
                 )
         except Exception:
             index._embeddings_sidecar = None
+        # v1.146.0: point the index at its posting-row sidecar the same way, so
+        # the first search can load term rows instead of re-tokenizing every
+        # body. Absent file => the attribute still points at where it WOULD be
+        # and `posting_cache.load_path` returns None, i.e. today's rebuild.
+        try:
+            from ..retrieval.posting_cache import _path as _postings_path
+            index._postings_sidecar = str(
+                _postings_path(str(self.base_path), owner_str, name_str)
+            )
+        except Exception as exc:
+            # Not silent: a path that cannot be built means every cold search
+            # on this index rebuilds, and the log is where that shows up.
+            import logging
+            logging.getLogger(__name__).debug(
+                "posting cache: no sidecar path for %s/%s (%s)", owner_str, name_str, exc
+            )
+            index._postings_sidecar = None
         _index_cache_put(cache_key, index)
         return _stamp_load_provenance(index, index_path, mtime_ns)
 
@@ -1754,7 +1794,27 @@ class DocStore:
             {**s.to_dict(), "content": (getattr(s, "content", "") or "")}
             for s in new_sections
         ]
-        bm25_stats = compute_corpus_stats(merged_for_stats, content_loader=_stats_loader)
+        # v1.146.0: the statistics are always recomputed EXACTLY, and with the
+        # posting sidecar on they are derived from its rows. A row is reused
+        # only while it still keys to its live section, so only the sections
+        # that changed are read and tokenized; a sidecar that is absent,
+        # damaged or from another tokenizer costs a full tokenization, which
+        # is what this pass did before. Either way the rows built here are
+        # written back, so the next save and the next cold search inherit them.
+        from ..retrieval import posting_cache
+
+        if posting_cache.enabled():
+            posting_rows = posting_cache.RowSet.build(
+                merged_for_stats, content_loader=_stats_loader,
+                reuse=posting_cache.load(str(self.base_path), owner, name),
+            )
+            bm25_stats = posting_rows.corpus_stats()
+        else:
+            posting_rows = None
+            bm25_stats = compute_corpus_stats(
+                merged_for_stats, content_loader=_stats_loader
+            )
+        bm25_stats["stats_tokenizer"] = posting_cache.tokenizer_identity()
 
         updated = DocIndex(
             repo=f"{owner}/{name}",
@@ -1828,6 +1888,8 @@ class DocStore:
         self._cancel_pending_retirement(owner, name)
         _evict_index_cache(index_path)
         self._write_summary(owner, name, updated)  # jdoc#77
+        if posting_rows is not None:
+            posting_cache.write(str(self.base_path), owner, name, posting_rows)
 
         # Update cached raw files
         content_dir = self._content_dir(owner, name)

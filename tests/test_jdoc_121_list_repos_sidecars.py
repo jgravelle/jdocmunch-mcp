@@ -193,13 +193,20 @@ def test_every_writer_module_suffix_is_in_the_canonical_list():
     to update a list. jdoc#121 existed because the same tuple was hand-copied
     to three places and the copy that mattered was never written at all.
     """
-    from jdocmunch_mcp.retrieval import boilerplate, dedup, glossary, related_persist
+    from jdocmunch_mcp.retrieval import (
+        boilerplate,
+        dedup,
+        glossary,
+        posting_cache,
+        related_persist,
+    )
 
     writers = {
         "glossary": glossary._terms_path,
         "related_persist": related_persist._path,
         "boilerplate": boilerplate._path,
         "dedup": dedup._path,
+        "posting_cache": posting_cache._path,
     }
     missing = {}
     for module_name, path_fn in writers.items():
