@@ -2,8 +2,9 @@
 
 The console script points at `jdocmunch_mcp.cli.main:main`, which keeps the MCP
 SDK out of every process that is not `serve`. `python -m jdocmunch_mcp` is the
-watch login service's launcher, so if `__main__` imported `.server` instead it
-would load the SDK on exactly that path while the console script did not.
+PostToolUse hook's spawn fallback (`hooks._self_invocation`) and the watch login
+service's launcher, so if `__main__` imported `.server` instead it would load
+the SDK on exactly those paths while the console script did not.
 
 These run a REAL `-m` subprocess. An in-process import of `__main__` would not
 show it: by then the test process may have loaded the SDK for another test.

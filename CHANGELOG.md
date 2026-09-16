@@ -111,6 +111,52 @@ anyone piping `jdocmunch-mcp --version`.
 `tests/test_cli_import_cost.py` ratchets the shape rather than the timing, so a
 stray top-level import fails the suite.
 
+### Fixed - the auto-reindex worker was spawned by a name the hook shell cannot resolve
+
+`run_posttooluse` handed `subprocess.Popen` the bare string `jdocmunch-mcp`.
+That is a PATH lookup, and the PATH a hook inherits is the one thing we already
+knew does not work: `init._hook_invocation` resolves `shutil.which` to an
+absolute path before writing the hook command into settings.json precisely
+because Claude Code's hook shell carries neither `~/.local/bin` nor a user venv
+nor a pipx shim (#39). The hook process therefore started fine and its child
+did not, on exactly the installs that needed the absolute path -- and the
+`except` swallowed it, so the only symptom was an index that quietly stopped
+tracking edits. Reported and fixed first in jcodemunch-mcp; same shape here.
+
+The spawn now goes through `_self_invocation()`: the absolute path this process
+was launched with when its basename is our entry point, otherwise
+`[sys.executable, "-m", "jdocmunch_mcp"]`, which needs no PATH lookup at all.
+Real-subprocess tests run `python -m jdocmunch_mcp` and check that
+`hook-reindex` is in its subcommand table and is dispatched.
+
+A RELATIVE `sys.argv[0]` is never executed, and the `os.path.isabs` check that
+enforces it is load-bearing rather than tidy: a relative path is re-resolved
+against the hook's cwd, which is the checked-out and untrusted repository the
+agent is editing, so a file named `jdocmunch-mcp` added by a hostile commit
+would otherwise become the thing we run on every Edit. `os.path.exists` alone
+is not a substitute -- a planted file exists.
+
+The `except` stays non-fatal, because a background refresh is never worth
+failing a hook for, but it now records an opt-in breadcrumb
+(`JDOCMUNCH_HOOK_LOG`, the same switch jdoc#76's other breadcrumbs use), since a
+permanently failing spawn was previously invisible. Default behaviour is
+unchanged. Its clause is `(OSError, ValueError)`; `FileNotFoundError` is an
+`OSError` subclass and stays covered, and `ValueError` is what `Popen` raises
+for an unusable argv. The debounce stamp is deliberately not rolled back on a
+failed spawn: a PATH failure is permanent, and the one transient case --
+spawn refused under memory pressure -- is the condition jdoc#76's throttle
+exists to avoid making worse.
+
+`tests/test_hook_spawn_invocation.py` carries an AST ratchet over every call
+that starts a process (`subprocess.Popen`/`run`/`call`/`check_call`/
+`check_output` and `os.exec*`/`os.spawn*`) in `cli/hooks.py`: it fails if the
+literal command name appears in the arguments in any shape -- a list literal, a
+concatenation, an f-string, or a name bound to such a literal in the same
+function -- and it is tested against each spelling and against the correct
+`sys.executable -m` shape. A source guard pins the `isabs` check, and a test
+pins that a failed spawn does not roll back the debounce stamp. No tool, schema
+or INDEX_VERSION change; no CLI flag added or removed.
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)

@@ -274,14 +274,53 @@ def _emit_additional_context(event_name: str, text: str) -> int:
     return 0
 
 
+def _self_invocation() -> list:
+    """Argv prefix that re-invokes THIS jdocmunch-mcp install.
+
+    The hook process inherits Claude Code's minimal hook-shell PATH -- the very
+    reason ``init._hook_invocation`` resolves ``shutil.which`` to an ABSOLUTE
+    path before writing it into settings.json (#39) -- so a bare-name child
+    spawn dies silently on exactly the installs (pipx, pip --user, framework
+    Python) that needed the absolute path in the first place. The hook itself
+    was launched correctly; only its child was not, so the reindex never ran
+    and nothing said so. Prefer the path this process was launched with; fall
+    back to ``python -m jdocmunch_mcp``, which needs no PATH lookup at all
+    (``__main__`` dispatches through ``cli.main:main`` exactly like the console
+    script, so the full subcommand table including ``hook-reindex`` is reachable
+    that way without loading the MCP SDK).
+
+    Ported from jcodemunch-mcp ``cli/hooks/reindex.py::_self_invocation``,
+    which hit this first; same defect shape, same remedy.
+    """
+    argv0 = sys.argv[0] or ""
+    base = os.path.basename(argv0).lower()
+    # isabs is load-bearing, not tidiness: a RELATIVE argv0 would be re-resolved
+    # against the hook's cwd -- the checked-out, UNTRUSTED repo being edited --
+    # where a file named `jdocmunch-mcp` dropped by a hostile commit must never
+    # become the thing we execute. `init` writes absolute paths, so absolute is
+    # the only legitimate shape here; a relative one falls through to the
+    # interpreter path instead, which is never attacker-controlled.
+    # `.exe` on Windows and the legacy `-script.py` suffix both ride on
+    # startswith; `_hook_invocation` normalises backslashes to `/`, which
+    # `isabs` still accepts for a drive-letter path.
+    if base.startswith("jdocmunch-mcp") and os.path.isabs(argv0) and os.path.exists(argv0):
+        return [argv0]
+    return [sys.executable, "-m", "jdocmunch_mcp"]
+
+
 def run_posttooluse() -> int:
     """PostToolUse hook: auto-reindex doc files after Edit/Write.
 
-    Reads hook JSON from stdin, extracts the file path, and spawns
-    ``jdocmunch-mcp index-local --path <dir>`` as a fire-and-forget
-    background process to keep the index fresh.
+    Reads hook JSON from stdin, extracts the file path, and spawns the
+    throttled ``hook-reindex <file>`` worker as a fire-and-forget background
+    process to keep the index fresh. (It said ``index-local --path <dir>``
+    until jdoc#76 moved the concurrency cap into a dedicated worker; the
+    docstring had not caught up.)
 
-    Non-doc files are skipped.  Errors are swallowed silently.
+    The child is spawned via ``_self_invocation()``, never by bare name --
+    see that function for why a bare name is unreachable from a hook shell.
+
+    Non-doc files are skipped.  Errors are swallowed (and breadcrumbed).
 
     Returns exit code (always 0).
     """
@@ -317,11 +356,30 @@ def run_posttooluse() -> int:
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
         subprocess.Popen(
-            ["jdocmunch-mcp", "hook-reindex", resolved],
+            _self_invocation() + ["hook-reindex", resolved],
             **kwargs,
         )
-    except (OSError, FileNotFoundError):
-        pass  # jdocmunch-mcp not in PATH -- skip silently
+    except (OSError, ValueError) as exc:
+        # Still non-fatal -- a background reindex is never worth failing a hook
+        # for -- but it should now be RARE: the bare name `jdocmunch-mcp` used
+        # to be handed to a hook-shell PATH that does not carry ~/.local/bin,
+        # user venvs or pipx shims, so this branch was the NORMAL outcome on
+        # those installs rather than the exceptional one. FileNotFoundError is
+        # a subclass of OSError and stays covered; ValueError is what Popen
+        # raises for an unusable argv (an embedded interpreter with an empty
+        # `sys.executable` is the one way the fallback can still be unusable).
+        #
+        # Breadcrumb, not silence: a permanently failing spawn was invisible --
+        # every symptom of it is an index that quietly stops tracking edits,
+        # which reads as "jDocMunch is stale" and points nowhere near here.
+        # Opt-in via JDOCMUNCH_HOOK_LOG like every other breadcrumb, so the
+        # default behaviour is byte-for-byte what it was.
+        _breadcrumb(f"spawn failed {resolved}: {type(exc).__name__}: {exc}")
+        # The debounce stamp written above is deliberately NOT rolled back. A
+        # PATH/exec failure is permanent, so retrying 3 s sooner buys nothing,
+        # and the one failure mode that IS transient -- fork/spawn refused
+        # under memory pressure -- is the exact condition jdoc#76's throttle
+        # exists to stop us making worse.
 
     return 0
 

@@ -110,9 +110,14 @@ class TestPostToolUse:
             assert self._run({"tool_input": {"file_path": str(p)}}, tmp_path) == 0
             mock_popen.assert_called_once()
             cmd = mock_popen.call_args[0][0]
-            assert cmd[0] == "jdocmunch-mcp"
+            # Used to assert cmd[0] == "jdocmunch-mcp" -- the bare name that
+            # a hook shell's minimal PATH cannot resolve. The prefix is now
+            # whatever _self_invocation() resolves to; the subcommand and the
+            # path are what this test is really about.
+            assert cmd[0] != "jdocmunch-mcp"
             # jdoc#76: spawns the throttled worker, not index-file directly.
-            assert cmd[1] == "hook-reindex"
+            assert cmd[-2] == "hook-reindex"
+            assert cmd[-1] == str(p.resolve())
 
     def test_spawns_reindex_for_rst(self, tmp_path):
         p = tmp_path / "doc.rst"
