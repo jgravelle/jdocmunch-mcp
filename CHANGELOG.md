@@ -86,6 +86,62 @@ turns the sidecar off. The stored `bm25_stats` block gains
 
 `tests/test_posting_sidecar.py` (56).
 
+### Changed - the Read interceptor no longer pays a whole CLI startup to say nothing
+
+Claude Code fires `jdocmunch-mcp hook-pretooluse` as a fresh process on **every
+`Read`**, and that process does very little: parse a JSON payload, test an
+extension, stat a file, print at most one line. Everything else it cost was
+startup: `verify_package_integrity()` (which calls
+`importlib.metadata.packages_distributions()`, reading metadata for every
+installed distribution, and caches nothing), the package `__init__`, and the
+argparse tree.
+
+`main()` now dispatches a bare `hook-pretooluse` before any of them.
+
+⚠⚠ **The argparse tree was the SMALL half, and that inverts the premise this
+started from.** On its own it would not have justified a second dispatch path.
+
+⚠⚠ **`hook-posttooluse` deliberately does NOT get the fast path.** It fires on
+Edit/Write rather than Read, it debounces, marks cross-process reindex state
+and spawns a worker that then indexes a file, so the startup is a small part of
+what it costs. And it is the hook that EXECUTES something: if exactly one hook
+path keeps the supply-chain integrity check, it is the one that spawns a child
+process.
+
+⚠⚠ **The integrity check not running on the Read path is the one behavioural
+difference, and it is deliberate.** Its only output is a stderr print, and
+Claude Code sends stderr from a hook that exits 0 to the debug log -- "never the
+transcript, and Claude never sees it". The check still runs on every other
+subcommand, `hook-posttooluse` among them. ⚠ The guard is an EXACT one-argument
+match, so `hook-pretooluse --help`, a typo'd extra argument and every other
+subcommand still go through argparse unchanged.
+
+⚠ **No logic is duplicated.** `_DOC_EXTENSIONS`, `_MIN_SIZE_BYTES`,
+`_emit_additional_context` and `run_pretooluse` MOVED into a new
+`cli/_hook_probe.py` whose
+module-level imports are `json`, `os` and `sys`; `cli/hooks.py` imports them
+back out, so `watch.py` and every existing test keep working against one
+definition. Two copies of `run_pretooluse` would drift on what the hint says and
+when, which is behaviour, not cosmetics. `pathlib`, `hashlib` and `subprocess`
+now load inside the reindex functions that use them, and `pathlib` also left
+`cli/main.py`'s module scope.
+
+⚠ **`__version__` is now resolved on first access (PEP 562 module
+`__getattr__`), not in the package body.** `cli/main.py`'s `_LazyVersionAction`
+already claimed to protect "the lazy `importlib.metadata` lookup in the package
+`__init__`" -- that laziness did not exist, so the Action was deferring an
+f-string in front of an eager lookup every import paid.
+
+`tests/test_pretooluse_fast_path.py` compares the fast path with a direct call
+of `run_pretooluse` -- the function the argparse branch dispatches to, minus
+argparse and the integrity check -- as real subprocesses: exit code, stdout
+bytes, stderr bytes. It pins that the fast path is what actually ran, and that
+`hook-posttooluse` still runs the integrity check.
+`test_cli_output_encoding.py::test_main_calls_it_first` was rewritten from a
+character-offset proxy to an AST walk: it asserted the reconfigure call sits in
+the first 200 characters of the function body, which a comment explaining the
+new branch broke while the branch itself called it on its first line.
+
 ### Changed - the console script and `python -m jdocmunch_mcp` no longer import the MCP SDK
 
 `pyproject`'s `jdocmunch-mcp` entry point moved from `jdocmunch_mcp.server:main`

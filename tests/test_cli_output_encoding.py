@@ -127,12 +127,46 @@ class TestTheHelperItself:
         assert calls == [], "an operator who named an encoding made a decision"
 
     def test_main_calls_it_first(self):
+        """Nothing that can emit output may run before the reconfigure, on ANY
+        path out of ``main``.
+
+        ⚠ This used to assert a CHARACTER OFFSET -- the call had to appear in
+        the first 200 chars of the function body -- which is a proxy for the
+        rule, not the rule. A comment block explaining a new dispatch branch
+        broke it while the branch itself called the helper on its very first
+        line. Offsets measure prose; this walks the AST and measures
+        statements, so it can only fail when the ordering is actually wrong.
+        """
+        import ast
         import inspect
         from jdocmunch_mcp import server as S
-        src = inspect.getsource(S.main)
-        assert "_force_utf8_stdio()" in src
-        body = src[src.index('"""Main entry point."""'):]
-        assert body.index("_force_utf8_stdio()") < 200
+
+        fn = ast.parse(inspect.getsource(S.main)).body[0]
+        body = fn.body
+        if (isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)):
+            body = body[1:]                                    # docstring
+
+        def _is_guard(stmt) -> bool:
+            return (isinstance(stmt, ast.Expr)
+                    and isinstance(stmt.value, ast.Call)
+                    and getattr(stmt.value.func, "id", None) == "_force_utf8_stdio")
+
+        for stmt in body:
+            if _is_guard(stmt):
+                break
+            # An assignment cannot print and cannot import; argv normalisation
+            # ahead of the dispatch decision is fine.
+            if isinstance(stmt, ast.Assign):
+                continue
+            # An early-dispatch branch is fine ONLY if it reconfigures first.
+            assert isinstance(stmt, ast.If) and stmt.body and _is_guard(stmt.body[0]), (
+                f"main() runs {ast.dump(stmt)[:80]}... before _force_utf8_stdio(). "
+                f"Every path out of main must reconfigure stdio before it can "
+                f"emit anything."
+            )
+        else:
+            raise AssertionError("main() never calls _force_utf8_stdio()")
 
 
 class TestTheMcpTransportIsNotAffected:

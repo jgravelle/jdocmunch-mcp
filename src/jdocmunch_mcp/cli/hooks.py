@@ -5,15 +5,34 @@ PostToolUse -- auto-reindex after Edit/Write on doc files to keep the index fres
 PreCompact  -- emit a session snapshot so doc orientation survives context compaction.
 
 All read JSON from stdin and write JSON to stdout per the Claude Code hooks spec.
+
+⚠⚠ **THE PreToolUse HALF LIVES IN ``_hook_probe.py`` AND IS IMPORTED BACK HERE.**
+That module is the one this package's ``hook-pretooluse`` fast path loads, and
+it is deliberately restricted to ``json``/``os``/``sys``. The names below are
+re-exports, NOT a second copy: ``watch.py`` already imports ``_DOC_EXTENSIONS``
+from this module and every existing caller and test keeps working unchanged,
+while there stays exactly one definition of each.
+
+⚠ ``hashlib``, ``subprocess`` and ``pathlib`` are imported INSIDE the functions
+that use them, all of which belong to the PostToolUse reindex machinery. A
+``Read`` must not pay for the reindexer. Keep new module-level imports out of
+this file for the same reason ``cli/main.py`` keeps them out of its own.
 """
 
-import hashlib
 import json
 import os
-import subprocess
 import sys
 import time
-from pathlib import Path
+
+# ⚠ Re-exports, not definitions. See ``_hook_probe`` for why the Read
+# interceptor owns its own leaf module; two copies of ``run_pretooluse`` would
+# drift.
+from ._hook_probe import (  # noqa: F401
+    _DOC_EXTENSIONS,
+    _MIN_SIZE_BYTES,
+    _emit_additional_context,
+    run_pretooluse,
+)
 
 try:
     import fcntl  # POSIX advisory file locks (cross-process)
@@ -23,25 +42,6 @@ try:
     import msvcrt  # Windows byte-range file locks (cross-process)
 except ImportError:  # pragma: no cover - non-Windows
     msvcrt = None
-
-# Doc extensions that benefit from jDocMunch structured retrieval.
-# Mirrors parser.ALL_EXTENSIONS.
-_DOC_EXTENSIONS: set[str] = {
-    ".md", ".markdown", ".mdx",
-    ".txt",
-    ".rst",
-    ".adoc", ".asciidoc", ".asc",
-    ".ipynb",
-    ".html", ".htm",
-    ".yaml", ".yml",
-    ".json", ".jsonc",
-    ".xml", ".svg", ".xhtml",
-    ".tscn", ".tres",
-}
-
-# Minimum file size (bytes) to trigger the jDocMunch suggestion.
-# Override with JDOCMUNCH_HOOK_MIN_SIZE env var.
-_MIN_SIZE_BYTES = int(os.environ.get("JDOCMUNCH_HOOK_MIN_SIZE", "2048"))
 
 
 # ---------------------------------------------------------------------------
@@ -59,12 +59,19 @@ _MIN_SIZE_BYTES = int(os.environ.get("JDOCMUNCH_HOOK_MIN_SIZE", "2048"))
 #     instead of silently discarded to DEVNULL.
 # ---------------------------------------------------------------------------
 
-def _hook_state_dir() -> Path:
+def _hook_state_dir():
     """Directory holding the reindex throttle state (debounce stamps + slot
-    locks + optional log). Co-located with the doc-index storage root."""
-    from ..storage.paths import default_root  # jdoc#146
-    base = str(default_root())
-    d = Path(base) / "_hooks"
+    locks + optional log). Co-located with the doc-index storage root.
+
+    Returns a ``pathlib.Path``; the annotation is gone because the name is no
+    longer bound at module scope.
+
+    ⚠ ``pathlib`` is imported here, not at module scope: every caller of this
+    function is on the PostToolUse reindex path, and the PreToolUse Read hook
+    must not pay for a module it never reaches. ``storage.paths`` is
+    imported here for the same reason (jdoc#146)."""
+    from ..storage.paths import default_root
+    d = default_root() / "_hooks"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -112,6 +119,7 @@ def _should_reindex(resolved_path: str) -> bool:
     if window <= 0:
         return True
     try:
+        import hashlib  # reindex-path only; a Read must not pay for it
         key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest()
         stamp_dir = _hook_state_dir() / "debounce"
         stamp_dir.mkdir(parents=True, exist_ok=True)
@@ -182,6 +190,7 @@ def run_hook_reindex(path: str) -> int:
     next edit reindexes -- correctness holds). Otherwise it reindexes the single
     file and releases the slot. Always exits 0: a background reindex failure
     must never surface as a hook error."""
+    from pathlib import Path
     try:
         resolved = str(Path(path).resolve())
     except (OSError, ValueError):
@@ -204,73 +213,6 @@ def run_hook_reindex(path: str) -> int:
         _breadcrumb(f"reindex error {resolved}: {exc}")
     finally:
         _release_reindex_slot(fd)
-    return 0
-
-
-def run_pretooluse() -> int:
-    """PreToolUse hook: intercept Read calls on large doc files.
-
-    Reads hook JSON from stdin.  If the target is a doc file above the
-    size threshold, emits a hint directing Claude to use jDocMunch tools
-    instead, as ``hookSpecificOutput.additionalContext`` JSON on stdout.
-
-    ⚠ That channel is the ONLY one that reaches the model from an exit-0
-    PreToolUse hook (#129). stderr on exit 0 goes to the debug log; plain
-    stdout is fed back only on UserPromptSubmit/SessionStart-class events;
-    a top-level ``systemMessage`` surfaces to the user. The hint was written
-    to stderr from 1.66.3 through 1.139.1 and was never received.
-
-    Small files, non-doc files, and unreadable paths are silently allowed.
-
-    Returns exit code (always 0 -- errors are swallowed to avoid blocking).
-    """
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    file_path: str = data.get("tool_input", {}).get("file_path", "")
-    if not file_path:
-        return 0
-
-    _, ext = os.path.splitext(file_path)
-    if ext.lower() not in _DOC_EXTENSIONS:
-        return 0
-
-    try:
-        size = os.path.getsize(file_path)
-    except OSError:
-        return 0
-
-    if size < _MIN_SIZE_BYTES:
-        return 0
-
-    # Targeted reads (offset/limit set) are likely pre-edit -- allow silently.
-    tool_input = data.get("tool_input", {})
-    if tool_input.get("offset") is not None or tool_input.get("limit") is not None:
-        return 0
-
-    # Full-file exploratory read on a large doc file -- warn but allow.
-    # Hard deny breaks the Edit workflow (Claude Code requires Read before Edit).
-    return _emit_additional_context(
-        "PreToolUse",
-        f"jDocMunch hint: this is a {size:,}-byte doc file. "
-        "Prefer search_sections + get_section for exploration. "
-        "Use Read only when you need exact line numbers for Edit.",
-    )
-
-
-def _emit_additional_context(event_name: str, text: str) -> int:
-    """Emit model-facing ``additionalContext`` for an exit-0 hook.
-
-    Same shape as jcodemunch-mcp's ``_common._emit_additional_context``:
-    ``{"hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...}}``
-    on stdout, exit 0. Exit 2 would also reach the model via stderr, but it
-    blocks the call, and a hard deny breaks Read-before-Edit.
-    """
-    print(json.dumps({
-        "hookSpecificOutput": {"hookEventName": event_name, "additionalContext": text},
-    }))
     return 0
 
 
@@ -337,6 +279,7 @@ def run_posttooluse() -> int:
     if ext.lower() not in _DOC_EXTENSIONS:
         return 0
 
+    from pathlib import Path
     resolved = str(Path(file_path).resolve())
 
     # jdoc#76: coalesce rapid repeat edits to the same file before spawning
@@ -349,6 +292,7 @@ def run_posttooluse() -> int:
     # directly) so the concurrency cap is enforced BEFORE the worker loads the
     # index -- N edits no longer become N simultaneous full-index loads.
     try:
+        import subprocess  # spawn-path only; a Read must not pay for it
         kwargs: dict = dict(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

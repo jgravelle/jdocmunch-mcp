@@ -19,8 +19,12 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 from typing import Optional
+
+# ⚠ ``pathlib`` is deliberately NOT here either. Exactly one function below
+# wants it -- ``_load_paths_from_arg``,
+# reachable only from ``index-local --paths-from``. Leaving it at module scope
+# put it on every ``Read``, because the PreToolUse hook imports this module.
 
 # ⚠ ``asyncio`` is deliberately NOT here: only the ``serve`` and ``watch``
 # branches ever use it. It is imported inside those two.
@@ -31,8 +35,15 @@ class _LazyVersionAction(argparse.Action):
 
     argparse's built-in ``version`` action interpolates its string at
     ``add_argument`` time, so the old ``version=f"%(prog)s {_ver}"`` resolved
-    ``__version__`` on EVERY invocation, whatever the subcommand. Reading it
-    inside ``__call__`` means only ``--version`` pays for it.
+    ``__version__`` on EVERY invocation -- which defeats the lazy
+    ``importlib.metadata`` lookup in the package ``__init__`` entirely. Reading
+    it inside ``__call__`` is what makes that laziness reach the CLI path.
+
+    ⚠ That sentence described an intent, not the code: until the PEP 562
+    ``__getattr__`` landed in ``jdocmunch_mcp/__init__.py`` the package resolved
+    the version in its module body, so this Action was deferring an f-string in
+    front of an eager lookup that every import already paid for. Both halves
+    are lazy now.
     """
 
     def __init__(self, option_strings, dest, **kwargs):
@@ -55,6 +66,7 @@ def _load_paths_from_arg(paths_from: str) -> tuple[Optional[list], Optional[str]
     Filters out empty lines and ``# ...`` comments. An empty list is treated as
     an error so the caller doesn't silently fall through to a full-tree index.
     """
+    from pathlib import Path
     try:
         if paths_from == "-":
             raw = sys.stdin.read()
@@ -115,6 +127,46 @@ def _force_utf8_stdio() -> None:
 
 def main(argv: Optional[list] = None):
     """Main entry point."""
+    # ⚠⚠ THE PreToolUse FAST PATH. Claude Code fires `hook-pretooluse` as a
+    # fresh process on EVERY `Read`, and that process does very little work: a
+    # JSON parse, an extension test, a size test, and at most one JSON line on
+    # stdout. Everything else it pays is this function's preamble:
+    #
+    #     verify_package_integrity()   packages_distributions() reads metadata
+    #                                  for every installed distribution, and is
+    #                                  NOT cached
+    #     the argparse tree            built for a subcommand it then ignores
+    #
+    # ⚠ The argparse tree is the SMALL half, which is the opposite of what this
+    # was expected to show. It is worth skipping, but on its own it would not
+    # have justified a second dispatch path.
+    #
+    # ⚠⚠ THE INTEGRITY CHECK IS DELIBERATELY NOT RUN HERE, and that is the one
+    # behavioural difference on this path. Its only output is a stderr print,
+    # and Claude Code's hook contract sends stderr from a hook that exits 0 to
+    # the debug log -- "never the transcript, and Claude never sees it" (the
+    # same contract quoted in cli/_hook_probe.py, where it already cost this
+    # repo a hint nobody received). A supply-chain warning emitted into a debug
+    # log once per Read is not a control; the check still runs on every other
+    # subcommand. `hook-posttooluse` deliberately keeps it -- see the note on
+    # its branch below.
+    #
+    # ⚠ The guard is an EXACT one-argument match, so `hook-pretooluse --help`,
+    # a typo'd extra argument and every other subcommand all fall through to
+    # argparse and behave exactly as before.
+    #
+    # ⚠ The import below is the SAME line the slow path uses, and that is
+    # load-bearing: `cli.hooks` re-exports `run_pretooluse` from the
+    # stdlib-only `cli._hook_probe` leaf, so this resolves the attribute on
+    # `cli.hooks` at call time exactly as the argparse branch does. Tests that
+    # patch `jdocmunch_mcp.cli.hooks.run_pretooluse` keep working, and there is
+    # still exactly one definition of the function.
+    _argv = sys.argv[1:] if argv is None else argv
+    if len(_argv) == 1 and _argv[0] == "hook-pretooluse":
+        _force_utf8_stdio()
+        from ..cli.hooks import run_pretooluse
+        sys.exit(run_pretooluse())
+
     _force_utf8_stdio()
     from ..security import verify_package_integrity
     verify_package_integrity()
@@ -467,6 +519,21 @@ def main(argv: Optional[list] = None):
         sys.exit(run_pretooluse())
 
     if args.command == "hook-posttooluse":
+        # ⚠⚠ NO FAST PATH HERE, ON PURPOSE, and the reason is not that it would
+        # not work. It fires on Edit/Write rather than Read -- one to two orders
+        # of magnitude rarer in a session -- and unlike the Read hook it does
+        # real work: a debounce stamp, a cross-process reindex mark
+        # (`reindex_state`), and a spawned `hook-reindex` worker that itself
+        # pays a full interpreter start and then indexes a file. The startup
+        # is a small part of what it costs, so skipping it buys little there,
+        # where on the Read path it is nearly all of the cost.
+        #
+        # It also needs `hashlib`, `subprocess` and `pathlib` regardless, so the
+        # leaf-module saving that makes the Read path cheap does not apply.
+        #
+        # ⚠ And the decisive half: this is the hook that EXECUTES something. If
+        # exactly one hook path keeps the supply-chain integrity check, it is
+        # the one that spawns a child process, not the one that reads a stat.
         from ..cli.hooks import run_posttooluse
         sys.exit(run_posttooluse())
 
