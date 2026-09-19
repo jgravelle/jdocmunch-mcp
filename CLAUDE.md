@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.142.0 |
+**Version:** 1.143.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,55 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.143.0 — `init` asks once about semantic search; the default install was words-only
+
+**A default install has no embedding provider, `init` never mentioned one, and
+`use_embeddings="auto"` then resolves to word matching.** Measured on the public
+benchmark (`github.com/jgravelle/jdoc-rerank-bench`, 492 questions, 6 doc sets):
+hybrid over lexical is +0.120 [+0.097, +0.144] nDCG@5, a direct answer in the top
+5 for 47% of questions against 34%. That was the largest effect in the rerank
+study and it was already ours. See "Rerank POC ruling" below.
+
+`init` now runs `cli/embeddings_offer.py` before its index step. Provider
+resolves: say which, embed. None: ask once, **default No**. On a yes it prints
+and runs `python -m pip install "fastembed>=0.8.0"` in its own interpreter,
+downloads the model through `_FastEmbedProvider()` so the file lands where the
+server looks, and indexes with embeddings. New flag `--with-embeddings`.
+
+⚠⚠ **`--yes` does NOT opt in, and that is the design, not an omission.** A flag
+that pre-approves config edits must not also pre-approve a ~250 MB download.
+`test_yes_flag_does_not_opt_in` was proven non-vacuous with `or yes` put back.
+⚠⚠ **This is the ONE place jdocmunch runs pip or starts a download for the
+user**, and a ratchet fails if any other module under `src/` names pip. The
+server itself still never installs or downloads unasked. README "Background
+behavior, fully disclosed" carries it, and a test binds the README to the
+numbers the prompt quotes.
+
+⚠ **After a failed model download the index step gets `use_embeddings=False`,
+not `"auto"`.** fastembed is installed by then, so `"auto"` would retry the
+download silently inside the index. ⚠ The quoted figures (34 / 47 / 492 / 6 /
+160 MB / 87 MB) are constants that the test RESTATES rather than imports.
+⚠ `fastembed` stays an optional extra (jjg, 2026-09-19).
+
+`doc_list_repos` rows gain `has_embeddings` (sidecar presence, index not
+opened) and `_meta.embeddings_tip`; measured 4,120 to 4,505 bytes on 8 indexes.
+The lexical `_meta.tip` now names the install step first.
+
+⚠ **Verified by a REAL run, not only the recorder tests**: throwaway venv,
+isolated home / store / model cache, exit 0 in 119 s, `search_mode: hybrid`,
+torch not loaded. ⚠ Two pre-existing quirks seen there and NOT fixed here:
+stdin from `/dev/null` reads as a TTY on Windows (prompts EOF to "no"), and with
+`DOC_INDEX_PATH` set the embeddings sidecar is written to the store AND to
+`~/.doc-index`. ⚠ Follow-up, not shipped: fastembed's default model cache is
+`<tempdir>/fastembed_cache`, which an OS cleanup can empty.
+
+⚠ I lost uncommitted `init.py` edits by reverting a mutation check with
+`git checkout -- <file>`. **Commit a checkpoint before mutating a file you have
+uncommitted work in**, or mutate a copy.
+
+`tests/test_init_embeddings_offer.py` (17). No tool, schema or INDEX_VERSION
+change. Squash `f732e92`; all 12 CI jobs green on that SHA before the bump.
 
 ## v1.142.0 — #132: the change set `index_local` already had (whakomatic)
 
@@ -68,57 +117,7 @@ non-vacuous with the old line restored (2 of 16 fail). ⚠ The #129 ratchet is
 scoped to `run_pretooluse` and would NOT have caught this — a ratchet catches
 the shape it names and nothing adjacent, which is why this file has its own.
 
-## v1.140.0 — #129 + #130: a hint nobody received, and a budget spent on the weakest word
-
-⚠ **Tracker-number collision.** These are jdocmunch's own #129 (mimosel, issue)
-and #130 (whakomatic, PR). The rotated v1.138.0 entry also says "#129 + #130",
-and those were jcodemunch-side finding numbers. Read the author, not the number.
-
-**#129 — the PreToolUse hint went to stderr on exit 0, which the model never
-sees.** From 1.66.3 through 1.139.1, `run_pretooluse` printed "prefer
-search_sections + get_section" to stderr and returned 0. Claude Code sends
-that to the debug log. The docstring said "directing Claude". Now emitted as
-`hookSpecificOutput.additionalContext` JSON on stdout via a new
-`_emit_additional_context`, the shape ported from jcm's `hooks/_common.py`.
-
-⚠⚠ **An exit-0 hook has ONE model-facing channel per event, and it differs by
-event.** stderr → debug log. Plain stdout → model only on UserPromptSubmit /
-SessionStart-class events. Top-level `systemMessage` → the user. PreCompact
-has NO channel and discards `systemMessage`. **A hook whose output is on the
-wrong channel is indistinguishable from one that fired correctly and was
-ignored**, which is why this sat for 73 minor versions.
-
-⚠⚠ **`run_precompact` has the SAME defect and is NOT fixed here.** It writes
-`{"systemMessage": snapshot}` on PreCompact. Filed as #131 rather than folded
-in: the remedy is a new `SessionStart` hook on `source=compact` plus `init`
-wiring (jcm's `hooks/snapshot.py` is the model), and one-issue-one-verdict
-says a channel fix and a new hook are two verdicts.
-
-`tests/test_jdoc_129_hint_channel.py` (6). The source-level ratchet against
-`print(..., file=sys.stderr)` inside `run_pretooluse` was proven non-vacuous
-with the old print restored: 2 of 6 fail. ⚠ The ratchet is scoped to
-`run_pretooluse` on purpose; `run_posttooluse` legitimately passes
-`stderr=subprocess.DEVNULL`.
-
-**#130 — Stage-A pruning admitted the most common term first (whakomatic).**
-`PostingIndex.candidates` walked terms in query order and returned at 200
-ids, so a term with document frequency over the cap took every slot and the
-section carrying the rare terms never reached BM25. Contributor measured on a
-4,970-section index: 0% hit rate with the common word first, 100% with it last.
-Now rarest-first with a total tiebreak; the overflowing list fills the rest via
-`heapq.nsmallest`, which also removed a pre-existing hash-seed dependence.
-
-⚠ **Raising the cap is the wrong lever**: in query order it must exceed the
-corpus's highest document frequency, which grows with the corpus. ⚠ **The
-replay gate cannot express this** — the self-fixture's top term is in 105 of
-570 sections, under the cap, so both algorithms admit identical candidates
-there. Tests use a 500-section corpus.
-
-⚠ **Contributor PR merged FIRST, before any CHANGELOG work of ours** (policy
-3b). Trial-merged onto master locally before approving: 2733 / 6, ruff clean.
-CLA status read on the head SHA (`count=1`, not from `gh pr checks`).
-
-## Lessons from rotated entries (v1.116.0–v1.139.1, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19)
+## Lessons from rotated entries (v1.116.0–v1.140.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -195,6 +194,17 @@ entry that earned no reusable rule got no line.
   it; warmup then blocks on a download that reaches the user as "connection timed
   out". **Guessing "cached" is the harmful guess; "not cached" costs a deferred
   load.** (v1.137.0)
+- ⚠⚠ **An exit-0 hook has ONE model-facing channel per event, and it differs
+  by event.** stderr goes to the debug log. Plain stdout reaches the model only
+  on UserPromptSubmit / SessionStart-class events. Top-level `systemMessage`
+  goes to the user. PreToolUse needs `hookSpecificOutput.additionalContext`.
+  PreCompact has NO channel. **Output on the wrong channel is indistinguishable
+  from a hook that fired and was ignored**, which is how a hint sat undelivered
+  for 73 minor versions. (v1.140.0)
+- ⚠ **Raising a candidate cap is the wrong lever when admission order is the
+  defect.** In query order the cap must exceed the corpus's highest document
+  frequency, which grows with the corpus. Admit rarest-first with a total
+  tiebreak. (v1.140.0)
 - ⚠⚠ **Check the SIBLINGS before implementing a suite-relevant fix.** jdoc was
   the one server of three missing an argument contract, which is exactly why the
   defect was reportable here and nowhere else. A defect reportable in only one of
@@ -237,6 +247,10 @@ entry that earned no reusable rule got no line.
   ratchet is SCOPED to functions that actually reach the fallback: unscoped it
   flagged every import-probe test, and **a guard with false positives is one
   nobody believes.** (v1.137.1)
+- ⚠ **A gate cannot express a defect its fixture is too small to reach.** The
+  replay self-fixture's commonest term is in 105 of 570 sections, under the
+  200-candidate cap, so the broken and fixed pruning admit identical candidates
+  there. Size the test corpus past the threshold (500 sections). (v1.140.0)
 - ⚠⚠ **Never restate a timing budget as a literal in a test.** A test asserted
   that a whole call beat the budget of one step inside it. Import the constant.
   (v1.128.0)
@@ -290,6 +304,9 @@ entry that earned no reusable rule got no line.
   `gpt5_latest` is pinned unverified. `tests/test_pricing_rates.py` RESTATES
   prices rather than importing them — a pin that reads the value it checks
   asserts nothing. (v1.139.1)
+- ⚠ **Two trackers share issue numbers. Read the author, not the number.**
+  jdoc's own #129/#130 and the jcodemunch-side findings #129/#130 both appear in
+  this repo's history. (v1.140.0)
 - ⚠⚠ **A rebuild underneath a scan cannot prove absence.** Staleness that means
   "the SOURCE moved" is blind to an index being rewritten under an unchanged
   tree. (v1.119.0)
@@ -886,7 +903,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.139.1 rotated there 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.140.0 and v1.139.1 rotated there 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
@@ -936,6 +953,7 @@ Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp
 - `cli/hooks.py` — PreToolUse (Read interceptor) + PostToolUse (auto-reindex) + SessionStart (session snapshot on compact/resume/fork, #131) hook handlers for Claude Code; PreCompact kept as a no-op; owns `_DOC_EXTENSIONS`
 - `watch.py` — (#78) `watch` daemon: `discover_local_doc_repos` + `watch_docs` (watchfiles-based, incremental `index_local` refresh, rediscover loop)
 - `service_installer.py` — (#78) cross-platform login-service installer for `watch` (`jdocmunch-watch`; systemd/launchd/Task Scheduler)
+- `cli/embeddings_offer.py` — (1.143.0) `init`'s offline-embeddings offer: the ONLY module that runs pip or starts a download; owns the benchmark figures the prompt quotes
 - `cli/init.py` — `jdocmunch-mcp init` full onboarding: client detection, config patching, CLAUDE.md policy, Cursor/Windsurf rules, hooks, index; `claude-md` subcommand
 - `embeddings/` — provider.py (Gemini + OpenAI), cosine_similarity, embed_sections, embed_query
 
@@ -943,7 +961,7 @@ Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp
 | Subcommand | Purpose |
 |------------|---------|
 | `serve` (default) | Run the MCP server (stdio) |
-| `init` | One-command onboarding: detect clients, write config, install policy, hooks, index |
+| `init` | One-command onboarding: detect clients, write config, install policy, hooks, index. Asks once about offline embeddings, default No; `--with-embeddings` opts in for scripts, `--yes` never does (1.143.0) |
 | `claude-md` | Print or install the Doc Exploration Policy (`--install global\|project`) |
 | `index-local --path <dir>` | Index a local folder (CLI, no MCP session needed) |
 | `index-file <path>` | Re-index a single file within an existing index |

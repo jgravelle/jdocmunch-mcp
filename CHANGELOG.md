@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.143.0] - 2026-09-19 - init asks once about semantic search
+
 ### Added - `init` asks once whether to turn semantic search on
 
 A default install has no embedding provider, `init` never mentioned one, and

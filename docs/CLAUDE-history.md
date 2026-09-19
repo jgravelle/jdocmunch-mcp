@@ -21,6 +21,64 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-09-19 — v1.140.0
+
+Moved out of `CLAUDE.md` on 2026-09-19 when v1.143.0 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first:
+one model-facing channel per hook event, a candidate cap that is the wrong lever,
+a gate that cannot express the defect it sits beside, and two trackers sharing
+issue numbers.
+
+## v1.140.0 — #129 + #130: a hint nobody received, and a budget spent on the weakest word
+
+⚠ **Tracker-number collision.** These are jdocmunch's own #129 (mimosel, issue)
+and #130 (whakomatic, PR). The rotated v1.138.0 entry also says "#129 + #130",
+and those were jcodemunch-side finding numbers. Read the author, not the number.
+
+**#129 — the PreToolUse hint went to stderr on exit 0, which the model never
+sees.** From 1.66.3 through 1.139.1, `run_pretooluse` printed "prefer
+search_sections + get_section" to stderr and returned 0. Claude Code sends
+that to the debug log. The docstring said "directing Claude". Now emitted as
+`hookSpecificOutput.additionalContext` JSON on stdout via a new
+`_emit_additional_context`, the shape ported from jcm's `hooks/_common.py`.
+
+⚠⚠ **An exit-0 hook has ONE model-facing channel per event, and it differs by
+event.** stderr → debug log. Plain stdout → model only on UserPromptSubmit /
+SessionStart-class events. Top-level `systemMessage` → the user. PreCompact
+has NO channel and discards `systemMessage`. **A hook whose output is on the
+wrong channel is indistinguishable from one that fired correctly and was
+ignored**, which is why this sat for 73 minor versions.
+
+⚠⚠ **`run_precompact` has the SAME defect and is NOT fixed here.** It writes
+`{"systemMessage": snapshot}` on PreCompact. Filed as #131 rather than folded
+in: the remedy is a new `SessionStart` hook on `source=compact` plus `init`
+wiring (jcm's `hooks/snapshot.py` is the model), and one-issue-one-verdict
+says a channel fix and a new hook are two verdicts.
+
+`tests/test_jdoc_129_hint_channel.py` (6). The source-level ratchet against
+`print(..., file=sys.stderr)` inside `run_pretooluse` was proven non-vacuous
+with the old print restored: 2 of 6 fail. ⚠ The ratchet is scoped to
+`run_pretooluse` on purpose; `run_posttooluse` legitimately passes
+`stderr=subprocess.DEVNULL`.
+
+**#130 — Stage-A pruning admitted the most common term first (whakomatic).**
+`PostingIndex.candidates` walked terms in query order and returned at 200
+ids, so a term with document frequency over the cap took every slot and the
+section carrying the rare terms never reached BM25. Contributor measured on a
+4,970-section index: 0% hit rate with the common word first, 100% with it last.
+Now rarest-first with a total tiebreak; the overflowing list fills the rest via
+`heapq.nsmallest`, which also removed a pre-existing hash-seed dependence.
+
+⚠ **Raising the cap is the wrong lever**: in query order it must exceed the
+corpus's highest document frequency, which grows with the corpus. ⚠ **The
+replay gate cannot express this** — the self-fixture's top term is in 105 of
+570 sections, under the cap, so both algorithms admit identical candidates
+there. Tests use a 500-section corpus.
+
+⚠ **Contributor PR merged FIRST, before any CHANGELOG work of ours** (policy
+3b). Trial-merged onto master locally before approving: 2733 / 6, ruff clean.
+CLA status read on the head SHA (`count=1`, not from `gh pr checks`).
+
 ## Rotated 2026-09-19 — v1.139.1
 
 Moved out of `CLAUDE.md` on 2026-09-19 when v1.142.0 became a fourth dated
