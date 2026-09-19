@@ -58,6 +58,10 @@ uncommitted work in**, or mutate a copy.
 
 `tests/test_init_embeddings_offer.py` (17). No tool, schema or INDEX_VERSION
 change. Squash `f732e92`; all 12 CI jobs green on that SHA before the bump.
+⚠ **Released from `31def2a`, not the bump commit `45dd13e`**: a docs commit
+(ROADMAP's rerank / Jev entry) followed the bump, and `ROADMAP.md` and
+`CHANGELOG.md` ship in the sdist, so the artifacts were REBUILT and CI re-read
+on the new SHA before upload. A docs-only commit after a build still stales it.
 
 ## v1.142.0 — #132: the change set `index_local` already had (whakomatic)
 
