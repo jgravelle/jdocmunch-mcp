@@ -356,6 +356,28 @@ a count into this file. **The `coordinated-retirement` hold is OVER** — #92
 merged as `3037428`, branch deleted from the workflow. Nothing is held; ship
 from `master`.
 
+## Rerank POC ruling (jjg, 2026-09-19): no `[rerank]` extra
+
+⚠⚠ **Do NOT merge a reranker or a `[rerank]` extra into this repo on the
+evidence we have.** A pre-registered study (harness, criteria and both decision
+memos at `C:\MCPs\jdoc-rerank-bench`, outside this tree on purpose) reranked the
+hybrid top 15-20 with an ONNX int8 MiniLM cross-encoder on two frozen test
+splits. The gain was real (+0.097 and +0.058 nDCG@5) and latency passed
+(195 / 288 ms), but it made 14.9% and 13.7% of queries worse against a 12% limit
+set before any data. **The limit failed twice and was not overridden.** Jev
+(TypeSafe) stays unbuilt until a local reranker clears that bar.
+
+⚠ **The largest effect in that study was ours already: hybrid search beat
+lexical by +0.09 to +0.18.** A default install has no embedding provider, `init`
+never mentions one, and `use_embeddings="auto"` then resolves to lexical. The
+follow-on work is getting users onto hybrid, not adding a stage after it.
+
+⚠ `semantic` already means embedding fusion in `search_sections`; any future
+rerank parameter is named `rerank`. ⚠ A rerank stage must leave
+`attach_confidence`, `build_verdict` and `record_ranking_event` reading the
+RETRIEVAL order (the jdoc#106 defect class). ⚠ int8 cross-encoder scores depend
+on batch composition; one passage per call.
+
 ## Standing lessons (suite-wide)
 
 Drawn from jcodemunch-mcp 1.108.291 (2026-08-22) and recorded here because each
