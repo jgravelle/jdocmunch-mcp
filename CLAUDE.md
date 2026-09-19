@@ -382,7 +382,11 @@ hybrid top 15-20 with an ONNX int8 MiniLM cross-encoder on two frozen test
 splits. The gain was real (+0.097 and +0.058 nDCG@5) and latency passed
 (195 / 288 ms), but it made 14.9% and 13.7% of queries worse against a 12% limit
 set before any data. **The limit failed twice and was not overridden.** Jev
-(TypeSafe) stays unbuilt until a local reranker clears that bar.
+(TypeSafe) stays unbuilt until a local reranker clears that bar. ⚠ **Jev was
+never RUN, so nothing we publish is a verdict on it**; say "not evaluated". The
+public record is `ROADMAP.md` ("A rerank stage, and Jev as a provider for it")
+and the harness README. A hosted provider sends query and passage text off the
+machine: opt-in, default off, README-disclosed before it ships.
 
 ⚠ **The largest effect in that study was ours already: hybrid search beat
 lexical by +0.09 to +0.18.** A default install has no embedding provider, `init`

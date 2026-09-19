@@ -75,6 +75,60 @@ refusal to delete unverifiable state is not up for revision.
 
 ---
 
+## A rerank stage, and Jev as a provider for it
+
+**Studied 2026-09-19. Not shipping. Gated on a published bar, not on a date.**
+Harness, criteria and both decision memos:
+[jdoc-rerank-bench](https://github.com/jgravelle/jdoc-rerank-bench).
+
+The idea: take the top 15 to 20 rows `search_sections` already returns and
+re-order them with a model that reads the query and each passage together. Two
+candidates were planned. Arm C is a local ONNX int8 cross-encoder. Arm B is
+**Jev**, a third-party hosted service, called through the same provider
+interface.
+
+**What was measured.** Arm C only, on two frozen test splits with the pass marks
+committed before any score. The gain was real, +0.097 and +0.058 nDCG@5, and
+latency passed at 195 / 288 ms p50 / p95 on CPU. It also made 14.9% and 13.7% of
+queries worse against a limit of 12%. That limit failed twice and was not
+overridden, so there is no `[rerank]` extra and no `rerank` parameter.
+
+**Jev was never run, and nothing here is a verdict on it.** The criteria judge
+arm B against a local reranker that has already passed, and none has. There is
+no Jev code in this package, no Jev setting, and no network call to it.
+
+**Close condition**, condensed from `DECISION_CRITERIA.md` in that repo, which
+is the authority where the two differ:
+
+- Section 6, local reranker, all of: pooled nDCG@5 gain with its lower bound
+  above zero and a point estimate of at least +0.04; every corpus above zero and
+  none with an interval entirely below zero; at most 12% of queries made worse;
+  no query class with an interval entirely below zero; p50 at most 300 ms and
+  p95 at most 500 ms.
+- Section 7, Jev, only after section 6 passes: B minus C with its lower bound
+  above zero and a point estimate of at least +0.04, **or** B within ±0.02 of C
+  with live p95 at or below C's. In both cases live p95 at most 1,000 ms, and
+  the vendor's terms permit publishing the comparison. If neither holds, Jev is
+  not integrated and that result is published.
+
+**Constraints on any future build.**
+
+- The parameter is named `rerank`. `semantic` already means embedding fusion in
+  `search_sections` and keeps that meaning on 1.x.
+- Confidence, the verdict and the ranking ledger keep reading the RETRIEVAL
+  order, not the re-ordered one.
+- int8 cross-encoder scores depend on what else is in the batch. One passage per
+  inference call.
+- A hosted provider sends the query and candidate passage text off the machine.
+  It would be opt-in, off by default, and disclosed in the README under
+  "Background behavior, fully disclosed" before it ships.
+
+**Sequencing.** No third test split with the studied approach. A new local
+reranker needs a new pre-registered split. What shipped instead is the larger
+effect the same study measured: `init` now offers offline embeddings (1.143.0).
+
+---
+
 ## Reserved for 2.x (license-blocked)
 
 Each item here would unavoidably break a 1.x licensee, so none of it ships until

@@ -53,6 +53,16 @@ use_embeddings=True". On a default install that does nothing, because there is n
 provider to embed with. The tip now gives the install command first and the
 re-index second. Same `_meta.tip` key.
 
+### Docs - ROADMAP records the rerank stage and Jev as gated, not shipping
+
+The study behind the figures above tested a local cross-encoder that re-orders
+the top results. It gained +0.097 and +0.058 nDCG@5 and made 14.9% and 13.7% of
+queries worse against a limit of 12% set before any score, so it does not ship.
+Jev, the hosted provider planned as the second arm, was never run: the criteria
+compare it against a local reranker that has passed, and none has. This package
+contains no Jev code and makes no call to it. `ROADMAP.md` carries the bar both
+would have to clear.
+
 ## [1.142.0] - 2026-09-19 - the change set index_local already had
 
 ### Added - #132: `index_local` returns the change set it already computed (whakomatic)
