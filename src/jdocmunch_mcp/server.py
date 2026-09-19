@@ -550,7 +550,7 @@ def _all_tools() -> list[Tool]:
         Tool(
             name="doc_list_repos",
             description=(
-                "List every indexed documentation repo with its identifier and storage location. Call it first to find out whether the docs you need are already indexed, and to get the repo id every other tool needs. Lists only indexes under the active storage_path, so an empty list means nothing is indexed there."
+                "List every indexed documentation repo with its identifier and storage location. Call it first to find out whether the docs you need are already indexed, and to get the repo id every other tool needs. Lists only indexes under the active storage_path, so an empty list means nothing is indexed there. Each row has has_embeddings: false means that index matches words only."
             ),
             inputSchema={
                 "type": "object",
@@ -3012,6 +3012,12 @@ def main(argv: Optional[list] = None):
         "--no-backup", action="store_true",
         help="Skip creating .bak backups before modifying files",
     )
+    init_parser.add_argument(
+        "--with-embeddings", dest="with_embeddings", action="store_true",
+        help="Install the offline embedding provider (pip install fastembed, about 160 MB) "
+             "and download its model (87 MB, huggingface.co) so search is semantic. "
+             "Never implied by --yes.",
+    )
 
     # --- claude-md ---
     cmd_parser = subparsers.add_parser(
@@ -3219,6 +3225,7 @@ def main(argv: Optional[list] = None):
             demo=args.demo,
             yes=args.yes,
             no_backup=args.no_backup,
+            with_embeddings=args.with_embeddings,
         )
         sys.exit(rc)
 

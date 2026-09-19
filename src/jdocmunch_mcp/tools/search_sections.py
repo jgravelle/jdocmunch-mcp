@@ -545,7 +545,13 @@ def search_sections(
     except Exception:
         pass
     if not has_emb and mode == "lexical":
-        meta["tip"] = "Re-index with use_embeddings=True for semantic search (better recall on paraphrased queries)"
+        # The old tip named a flag and not the missing piece: on a default
+        # install there is no provider, so use_embeddings=True alone does nothing.
+        meta["tip"] = (
+            "This index has no embeddings, so search matched words only. For semantic search: "
+            'pip install "jdocmunch-mcp[fastembed]" (offline, no key), then re-index with '
+            "index_local(path=..., use_embeddings=True)."
+        )
 
     # Suite-parity honesty verdict. degraded = caller asked for semantic on an
     # index with no embeddings; absent = zero matches; low_confidence keys off

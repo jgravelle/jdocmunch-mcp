@@ -429,15 +429,20 @@ def install_hooks(*, dry_run: bool = False, backup: bool = True) -> str:
 # Index current directory
 # ---------------------------------------------------------------------------
 
-def run_index(*, dry_run: bool = False) -> str:
-    """Index the current working directory using index_local."""
+def run_index(*, dry_run: bool = False, use_embeddings: bool | str = "auto") -> str:
+    """Index the current working directory using index_local.
+
+    ``use_embeddings`` is passed through as the embeddings offer resolved it.
+    An explicit False matters: after a failed model download fastembed IS
+    installed, so "auto" would retry the download inside the index step.
+    """
     cwd = os.getcwd()
     if dry_run:
         return f"  would index {cwd}"
 
     try:
         from ..tools.index_local import index_local
-        result = index_local(path=cwd)
+        result = index_local(path=cwd, use_embeddings=use_embeddings)
         files = result.get("file_count", result.get("files_indexed", "?"))
         sections = result.get("section_count", result.get("symbols_indexed", "?"))
         return f"  indexed {cwd} ({files} files, {sections} sections)"
@@ -535,6 +540,7 @@ def run_init(
     demo: bool = False,
     yes: bool = False,
     no_backup: bool = False,
+    with_embeddings: bool = False,
 ) -> int:
     """Run the init flow. Returns exit code (0 = success)."""
     if demo:
@@ -661,8 +667,18 @@ def run_init(
     if not do_index and interactive:
         print()
         do_index = _prompt_yn(f"Index current directory ({os.getcwd()})?", default=True)
+    # ----- Step 4a: offer offline embeddings (default No; --yes never opts in) -----
+    use_embeddings: bool | str = "auto"
+    if do_index or with_embeddings:
+        from .embeddings_offer import offer_embeddings
+        use_embeddings = offer_embeddings(
+            interactive=interactive,
+            with_embeddings=with_embeddings,
+            dry_run=dry_run,
+            prompt_yn=_prompt_yn,
+        )
     if do_index:
-        msg = run_index(dry_run=dry_run)
+        msg = run_index(dry_run=dry_run, use_embeddings=use_embeddings)
         print(f"  Index:{msg}")
         if demo and "would" in msg:
             _demo_actions.append((

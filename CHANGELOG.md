@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Added - `init` asks once whether to turn semantic search on
+
+A default install has no embedding provider, `init` never mentioned one, and
+`use_embeddings="auto"` then resolves to word matching. A user could run
+jdocmunch for months without learning that the better retrieval mode existed.
+On a public benchmark of 492 real user questions over 6 documentation sets
+([jdoc-rerank-bench](https://github.com/jgravelle/jdoc-rerank-bench)), semantic
+retrieval put a direct answer in the top 5 results for 47% of questions, against
+34% for word matching. That gap was the largest effect the study measured,
+larger than the reranker the study was built to evaluate, which did not ship.
+
+`jdocmunch-mcp init` now checks for a provider before it indexes. If one
+resolves, it says which and indexes with embeddings. If none does, it asks once.
+**The default answer is no.** On a yes it prints and then runs
+`python -m pip install "fastembed>=0.8.0"` in its own interpreter (about 160 MB,
+onnxruntime and not torch), downloads one model file from huggingface.co
+(87 MB), and indexes with embeddings. Nothing from the indexed documents leaves
+the machine.
+
+- **`--yes` does not answer this question.** It accepts config edits. A scripted
+  install opts in with the new `--with-embeddings`.
+- `--dry-run` prints the command and both sizes and touches nothing.
+- No usable pip (a `uv tool` or `pipx` install has none), a failed install, or a
+  failed download: `init` prints the manual command for each install style and
+  indexes with word matching. It never raises. After a failed download the index
+  step is told `use_embeddings=False` explicitly, because `fastembed` is
+  installed by then and `"auto"` would retry the download silently.
+- The MCP server still never installs or downloads anything unasked. README,
+  "Background behavior, fully disclosed", carries the disclosure, and a test
+  binds the README text to the numbers the prompt quotes.
+
+`fastembed` stays an optional extra. A word-matching install does not acquire a
+native runtime it never calls.
+
+### Added - `doc_list_repos` says which indexes are words-only
+
+Each row carries `has_embeddings`, read from the presence of the embeddings
+sidecar without opening the index. When any index lacks embeddings,
+`_meta.embeddings_tip` says how many and gives the one command that fixes it.
+Measured on a store of 8 indexes: 4,120 to 4,505 response bytes. One boolean per
+row, so it grows with the row count and nothing else.
+
+### Changed - the word-matching search tip names the missing piece
+
+`search_sections` on an index without embeddings used to say "Re-index with
+use_embeddings=True". On a default install that does nothing, because there is no
+provider to embed with. The tip now gives the install command first and the
+re-index second. Same `_meta.tip` key.
+
 ## [1.142.0] - 2026-09-19 - the change set index_local already had
 
 ### Added - #132: `index_local` returns the change set it already computed (whakomatic)

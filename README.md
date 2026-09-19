@@ -197,6 +197,33 @@ not already cached, so a first run defers the download to your first search
 rather than stalling the MCP handshake behind it
 ([#110](https://github.com/jgravelle/jdocmunch-mcp/issues/110)).
 
+**A package install and a model download, only if you say yes to `init`.**
+`jdocmunch-mcp init` checks whether an embedding provider is available. If none
+is, it asks once whether to turn semantic search on. **The default answer is
+no.** On a yes it does two things and prints both before doing them:
+
+- runs `python -m pip install "fastembed>=0.8.0"` in the Python environment
+  jdocmunch is running in (about 160 MB installed; pulls onnxruntime, not torch);
+- downloads one model file, `all-MiniLM-L6-v2` in ONNX form, from
+  huggingface.co (87 MB, once).
+
+After that, embedding runs on your machine. No text from your documents is sent
+anywhere. `--yes` does **not** answer this question for you: it accepts config
+edits, not a download. A scripted install opts in with `--with-embeddings`.
+`--dry-run` prints the command and the sizes and touches nothing. If pip is not
+usable (a `uv tool` or `pipx` install has none) or the install fails, `init`
+prints the manual command for your install style and carries on with word
+matching. The MCP server itself never installs or downloads anything unasked.
+
+Why `init` asks at all: on a public benchmark of 492 real user questions over 6
+documentation sets, semantic (hybrid) search put a direct answer in the top 5
+results for 47% of questions, against 34% for word matching alone. Method, data
+and the negative result that came with it:
+[jdoc-rerank-bench](https://github.com/jgravelle/jdoc-rerank-bench). Measured on
+one CPU-only machine, embedding added about 7 seconds per 1,000 sections to a
+first index. `doc_list_repos` reports `has_embeddings` per index, so you can see
+which ones are still words-only.
+
 **FastEmbed as the offline provider.** `pip install jdocmunch-mcp[fastembed]`
 runs the same `all-MiniLM-L6-v2` model through onnxruntime instead of torch,
 which is a much smaller install. When both offline providers are present

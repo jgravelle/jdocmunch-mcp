@@ -380,7 +380,7 @@ class TestCLIDispatch:
             assert exc_info.value.code == 0
             m.assert_called_once_with(
                 clients=None, claude_md=None, hooks=True, index=False,
-                dry_run=False, demo=False, yes=False, no_backup=False,
+                dry_run=False, demo=False, yes=False, no_backup=False, with_embeddings=False,
             )
 
     def test_claude_md_dispatch(self):
