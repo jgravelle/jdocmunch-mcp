@@ -386,14 +386,17 @@ hybrid top 15-20 with an ONNX int8 MiniLM cross-encoder on two frozen test
 splits. The gain was real (+0.097 and +0.058 nDCG@5) and latency passed
 (195 / 288 ms), but it made 14.9% and 13.7% of queries worse against a 12% limit
 set before any data. **The limit failed twice and was not overridden.** Jev
-(TypeSafe) stays unbuilt until a local reranker clears that bar. ⚠ **Jev was
-never RUN, so nothing we publish is a verdict on it**; say "not evaluated", never
-"failed". The public record is `ROADMAP.md` ("A rerank stage, and Jev as a
-provider for it") and the harness README. A hosted provider sends query and
-passage text off the machine: opt-in, default off, README-disclosed before it
-ships. ⚠ An exploratory screen was pre-registered in the harness (A3) and **not
-executed** for want of a vendor key (A4); zero requests. Read A3/A4 before
-designing another one.
+(TypeSafe) stays unbuilt until a local reranker clears that bar. ⚠⚠ **Jev WAS
+run once, 2026-09-20, as a pre-registered exploratory screen on the spent splits
+(harness A3/A4/A5), and it cleared A3's bar.** That authorises a confirmatory
+study and nothing else — **never say it passed section 7**, which judges it
+against a local reranker that cleared section 6, and none has. ⚠ Two caveats
+travel with every quote of it: the hosted judge was graded against LLM-produced
+labels using near-rubric wording, so part of its margin is grader agreement the
+harness cannot isolate; and it is not deterministic where our local model is.
+A hosted provider sends query and passage text off the machine: opt-in, default
+off, README-disclosed before it ships. Public record: `ROADMAP.md` ("A rerank
+stage, and Jev as a provider for it") and the harness memos.
 
 ⚠ **The largest effect in that study was ours already: hybrid search beat
 lexical by +0.09 to +0.18.** A default install has no embedding provider, `init`
