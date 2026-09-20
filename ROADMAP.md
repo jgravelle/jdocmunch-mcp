@@ -97,6 +97,15 @@ overridden, so there is no `[rerank]` extra and no `rerank` parameter.
 arm B against a local reranker that has already passed, and none has. There is
 no Jev code in this package, no Jev setting, and no network call to it.
 
+An exploratory screen for arm B was designed and pre-registered in the harness on
+2026-09-19 (amendments A3 and A4), then **not executed**: no vendor API key could
+be obtained, so zero requests were sent. ⚠ Read that as unmeasured, not as
+failed. A provider and its offline contract tests sit on an unpushed branch there
+as design notes. Anyone picking this up should read A3 and A4 before rebuilding
+the screen, and should not describe the local reranker's 0.95 promotion threshold
+as grid-selected — the harness has no such grid, and A3 is where a mechanical
+rule was first written down.
+
 **Close condition**, condensed from `DECISION_CRITERIA.md` in that repo, which
 is the authority where the two differ:
 
@@ -119,6 +128,11 @@ is the authority where the two differ:
   order, not the re-ordered one.
 - int8 cross-encoder scores depend on what else is in the batch. One passage per
   inference call.
+- ⚠ A rank transform that squashes its input with a sigmoid, as the harness's
+  gated promotion does, silently becomes a no-op when handed a score that is
+  **already** a probability: every threshold above about 0.73 then promotes
+  nothing, and the stage reads as "no benefit" rather than as a unit error. Match
+  the score's scale to the transform's, and pin it with a test.
 - A hosted provider sends the query and candidate passage text off the machine.
   It would be opt-in, off by default, and disclosed in the README under
   "Background behavior, fully disclosed" before it ships.
