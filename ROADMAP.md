@@ -77,7 +77,8 @@ refusal to delete unverifiable state is not up for revision.
 
 ## A rerank stage, and Jev as a provider for it
 
-**Studied 2026-09-19. Not shipping. Gated on a published bar, not on a date.**
+**Studied 2026-09-19, arm B screened 2026-09-20. Not shipping. Gated on a
+published bar, not on a date.**
 Harness, criteria and both decision memos:
 [jdoc-rerank-bench](https://github.com/jgravelle/jdoc-rerank-bench).
 
@@ -93,18 +94,29 @@ latency passed at 195 / 288 ms p50 / p95 on CPU. It also made 14.9% and 13.7% of
 queries worse against a limit of 12%. That limit failed twice and was not
 overridden, so there is no `[rerank]` extra and no `rerank` parameter.
 
-**Jev was never run, and nothing here is a verdict on it.** The criteria judge
-arm B against a local reranker that has already passed, and none has. There is
-no Jev code in this package, no Jev setting, and no network call to it.
+**Arm B was run once, on 2026-09-20, as an exploratory screen on spent splits.
+That is not a verdict and not a ship decision.** There is still no Jev code in
+this package, no Jev setting, and no network call to it.
 
-An exploratory screen for arm B was designed and pre-registered in the harness on
-2026-09-19 (amendments A3 and A4), then **not executed**: no vendor API key could
-be obtained, so zero requests were sent. ⚠ Read that as unmeasured, not as
-failed. A provider and its offline contract tests sit on an unpushed branch there
-as design notes. Anyone picking this up should read A3 and A4 before rebuilding
-the screen, and should not describe the local reranker's 0.95 promotion threshold
-as grid-selected — the harness has no such grid, and A3 is where a mechanical
-rule was first written down.
+The screen was pre-registered in the harness as amendment A3 on 2026-09-19,
+before a vendor key existed; A4 records the day it was closed unrun for lack of
+access, and A5 the day it reopened with every A3 setting unchanged. It cleared
+A3's pre-registered bar on both spent splits, which under A3 means exactly one
+thing: **a fresh confirmatory study would be justified.** It cannot authorise a
+build, because section 7 judges arm B against a local reranker that has cleared
+section 6 and none has.
+
+⚠⚠ **The screen's memo is NOT published yet** — it is held in that repository
+pending a review of the vendor's terms, so the link above will not show it. Do not
+quote figures for arm B from anywhere until it is. Two caveats are load-bearing
+whenever it is quoted. Jev is an LLM judge that was scored against LLM-produced labels
+using a question close to a paraphrase of the labelling rubric, while the local
+cross-encoder shares no method with the grader — so an unknown share of the gap
+is agreement with the grader rather than retrieval quality, and that harness
+cannot separate them. And the hosted judge is not deterministic, where the local
+model is exactly reproducible. ⚠ Do not describe the local reranker's 0.95
+promotion threshold as grid-selected; the harness has no such grid, and A3 is
+where a mechanical rule was first written down.
 
 **Close condition**, condensed from `DECISION_CRITERIA.md` in that repo, which
 is the authority where the two differ:
