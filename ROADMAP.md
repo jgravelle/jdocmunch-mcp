@@ -106,8 +106,10 @@ thing: **a fresh confirmatory study would be justified.** It cannot authorise a
 build, because section 7 judges arm B against a local reranker that has cleared
 section 6 and none has.
 
-⚠⚠ **Read the harness memo before quoting any of it.** Two caveats are
-load-bearing. Jev is an LLM judge that was scored against LLM-produced labels
+⚠⚠ **The screen's memo is NOT published yet** — it is held in that repository
+pending a review of the vendor's terms, so the link above will not show it. Do not
+quote figures for arm B from anywhere until it is. Two caveats are load-bearing
+whenever it is quoted. Jev is an LLM judge that was scored against LLM-produced labels
 using a question close to a paraphrase of the labelling rubric, while the local
 cross-encoder shares no method with the grader — so an unknown share of the gap
 is agreement with the grader rather than retrieval quality, and that harness

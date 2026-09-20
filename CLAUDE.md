@@ -396,7 +396,9 @@ labels using near-rubric wording, so part of its margin is grader agreement the
 harness cannot isolate; and it is not deterministic where our local model is.
 A hosted provider sends query and passage text off the machine: opt-in, default
 off, README-disclosed before it ships. Public record: `ROADMAP.md` ("A rerank
-stage, and Jev as a provider for it") and the harness memos.
+stage, and Jev as a provider for it"). ⚠ **The screen's memo and every arm B
+figure are UNPUBLISHED**, held pending a review of the vendor's terms — they are
+not in the public harness repo, so do not quote a number for arm B from memory.
 
 ⚠ **The largest effect in that study was ours already: hybrid search beat
 lexical by +0.09 to +0.18.** A default install has no embedding provider, `init`
