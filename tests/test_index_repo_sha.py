@@ -10,6 +10,20 @@ from jdocmunch_mcp.storage.doc_store import DocStore
 from jdocmunch_mcp.tools.list_repos import list_repos
 from jdocmunch_mcp.tools.search_sections import search_sections
 
+def _patch_head(monkeypatch, mod, fake_head):
+    """jdoc#135: the request moved from `fetch_head_commit_sha` to
+    `fetch_head_commit`, which returns (sha, date) in one call.
+
+    ⚠ Patching only the old name leaves the real HTTP call live and the test
+    passes or fails for the wrong reason. Both names are stubbed here, and the
+    existing sha-returning fakes are reused unchanged by adapting them.
+    """
+    async def fake_commit(*a, **kw):
+        return await fake_head(*a, **kw), "2026-09-20T13:15:39+00:00"
+    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    monkeypatch.setattr(mod, "fetch_head_commit", fake_commit)
+
+
 
 @pytest.mark.asyncio
 async def test_index_repo_fetches_tree_and_content_at_resolved_sha(tmp_path, monkeypatch):
@@ -33,7 +47,7 @@ async def test_index_repo_fetches_tree_and_content_at_resolved_sha(tmp_path, mon
         refs.append(("content", ref, path))
         return "# README\n\nPinned content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -83,7 +97,7 @@ async def test_index_repo_fallback_to_head_is_not_certified(tmp_path, monkeypatc
         refs.append(("content", ref, path))
         return "# README\n\nUnpinned content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -129,7 +143,7 @@ async def test_index_repo_ref_fetches_tree_and_content_at_resolved_sha(tmp_path,
         refs.append(("content", ref, path))
         return "# README\n\nVersioned content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -174,7 +188,7 @@ async def test_index_repo_ref_composes_with_custom_name(tmp_path, monkeypatch):
         assert ref == sha
         return "# README\n\nNamed versioned content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -206,7 +220,7 @@ async def test_index_repo_explicit_unknown_ref_fails_without_head_fallback(tmp_p
     async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
         raise AssertionError("explicit missing ref should not fetch tree/content")
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
 
     result = await mod.index_repo(
@@ -228,7 +242,7 @@ async def test_index_repo_rejects_invalid_ref_before_network_fetch(tmp_path, mon
     async def fake_head(owner, repo, token=None, client=None, ref="HEAD"):
         raise AssertionError("invalid ref should fail before network fetch")
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
 
     result = await mod.index_repo(
         "octo/docs",
@@ -303,7 +317,7 @@ async def test_index_repo_recovers_legacy_matching_sha_via_pinned_fetch(tmp_path
         refs.append(("content", ref, path))
         return content
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -350,7 +364,7 @@ async def test_index_repo_fast_path_backfills_legacy_source_repo_metadata(tmp_pa
     async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
         raise AssertionError("matching certified legacy index should stay on SHA fast path")
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
 
     result = await mod.index_repo(
@@ -390,7 +404,7 @@ async def test_index_repo_custom_name_stores_under_override_and_keeps_source_ide
         assert (owner, repo, path, ref) == ("octo", "docs", "README.md", sha)
         return "# Custom Docs\n\nHello custom content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -460,7 +474,7 @@ async def test_index_repo_custom_name_fast_path_uses_override_storage(tmp_path, 
     async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
         return "# README\n\nStable content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -514,7 +528,7 @@ async def test_index_repo_ref_fast_path_uses_requested_ref(tmp_path, monkeypatch
     async def fake_tree(owner, repo, token=None, client=None, ref="HEAD"):
         raise AssertionError("matching certified ref index should stay on SHA fast path")
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
 
     result = await mod.index_repo(
@@ -552,7 +566,7 @@ async def test_index_repo_custom_name_same_storage_different_source_does_not_fas
     async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
         return f"# README\n\nContent from {repo}."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -603,7 +617,7 @@ async def test_index_repo_custom_name_changed_file_incremental_uses_override_sto
     async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
         return f"# README\n\n{state['body']}"
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -662,7 +676,7 @@ async def test_index_repo_moved_ref_with_unchanged_docs_updates_sha_metadata(tmp
     async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
         return "# README\n\nBranch content unchanged."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -718,7 +732,7 @@ async def test_index_repo_custom_name_fallback_to_head_is_not_certified(tmp_path
     async def fake_content(owner, repo, path, token=None, client=None, ref="HEAD"):
         return "# README\n\nUncertified custom content."
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
     monkeypatch.setattr(mod, "fetch_repo_tree", fake_tree)
     monkeypatch.setattr(mod, "fetch_gitignore", fake_gitignore)
     monkeypatch.setattr(mod, "fetch_file_content", fake_content)
@@ -760,7 +774,7 @@ async def test_index_repo_custom_name_rejects_unsafe_storage_names(tmp_path, mon
     async def fake_head(owner, repo, token=None, client=None, ref="HEAD"):
         raise AssertionError("invalid name should fail before network fetch")
 
-    monkeypatch.setattr(mod, "fetch_head_commit_sha", fake_head)
+    _patch_head(monkeypatch, mod, fake_head)
 
     result = await mod.index_repo(
         "octo/docs",

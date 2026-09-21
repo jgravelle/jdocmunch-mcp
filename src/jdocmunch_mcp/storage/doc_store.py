@@ -326,6 +326,10 @@ class DocIndex:
     sections: list         # Serialized Section dicts (without content by default)
     index_version: int = INDEX_VERSION
     file_hashes: dict = field(default_factory=dict)
+    # jdoc#136: {doc_path: ISO 8601 string} as of the last indexing pass.
+    # Empty for every index written before 1.144.0; `list_docs` omits the
+    # key per document rather than guessing, and discloses the count.
+    file_mtimes: dict = field(default_factory=dict)
     head_sha: Optional[str] = None
     source_dirty: bool = False
     sha_certified: bool = False
@@ -1215,6 +1219,7 @@ class DocStore:
         raw_files: dict,        # {doc_path: content}
         doc_types: dict,        # {".md": N}
         file_hashes: Optional[dict] = None,
+        file_mtimes: Optional[dict] = None,
         head_sha: Optional[str] = None,
         source_dirty: bool = False,
         sha_certified: bool = False,
@@ -1249,6 +1254,7 @@ class DocStore:
             sections=[s.to_dict() for s in sections],
             index_version=INDEX_VERSION,
             file_hashes=file_hashes,
+            file_mtimes=dict(file_mtimes or {}),
             head_sha=head_sha,
             source_dirty=source_dirty,
             sha_certified=sha_certified,
@@ -1335,6 +1341,7 @@ class DocStore:
             sections=data["sections"],
             index_version=stored_version,
             file_hashes=data.get("file_hashes", {}),
+            file_mtimes=data.get("file_mtimes", {}),
             head_sha=data.get("head_sha"),
             source_dirty=bool(data.get("source_dirty", False)),
             sha_certified=bool(data.get("sha_certified", False)),
@@ -1429,6 +1436,7 @@ class DocStore:
         new_sections: list,     # list[Section]
         raw_files: dict,        # {doc_path: content} for changed + new files only
         doc_types: dict,
+        file_mtimes=None,
         head_sha=_UNSET,
         source_dirty=_UNSET,
         sha_certified=_UNSET,
@@ -1485,6 +1493,17 @@ class DocStore:
         for fp, content in raw_files.items():
             file_hashes[fp] = _file_hash(content)
 
+        # jdoc#136: the same three moves as the hashes above — a deleted file
+        # loses its time, a changed or new file takes the supplied one, and an
+        # untouched file keeps what it had. ⚠ A pass that supplies no times
+        # leaves every existing entry alone rather than clearing the map.
+        new_mtimes = dict(index.file_mtimes or {})
+        for f in deleted_files:
+            new_mtimes.pop(f, None)
+        for fp, mt in (file_mtimes or {}).items():
+            if mt is not None:
+                new_mtimes[fp] = mt
+
         # Recompute BM25 stats. Kept sections come from the loaded index
         # (no inline content); pass a content_loader so the stats reflect
         # body text, then merge in the new in-memory Section objects.
@@ -1524,6 +1543,7 @@ class DocStore:
             sections=all_section_dicts,
             index_version=INDEX_VERSION,
             file_hashes=file_hashes,
+            file_mtimes=new_mtimes,
             head_sha=index.head_sha if head_sha is _UNSET else head_sha,
             source_dirty=index.source_dirty if source_dirty is _UNSET else bool(source_dirty),
             sha_certified=index.sha_certified if sha_certified is _UNSET else bool(sha_certified),
@@ -2233,6 +2253,11 @@ class DocStore:
             "index_version": index.index_version,
             "file_hashes": index.file_hashes,
         }
+        # jdoc#136. ⚠⚠ Named HERE or it round-trips as empty: this
+        # serializer is an allow-list, not asdict(). Written only when
+        # non-empty, like its neighbours, so a legacy index gains no key.
+        if getattr(index, "file_mtimes", None):
+            d["file_mtimes"] = index.file_mtimes
         if index.head_sha:
             d["head_sha"] = index.head_sha
         if index.source_dirty:

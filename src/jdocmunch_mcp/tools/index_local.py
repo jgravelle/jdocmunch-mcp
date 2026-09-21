@@ -1322,60 +1322,28 @@ def _walk_rel(dir_rel: str, name: str = "") -> str:
     return f"{base}{name}"
 
 
-# `changes` is a recently-edited map, not an inventory: at most this many
-# entries, newest first. `changes_total` carries the uncapped count.
-CHANGES_CAP = 50
+# jdoc#135: one implementation, shared with `index_repo`. The names are
+# re-exported under their original spelling because existing tests and call
+# sites reference them here.
+from ._changes import CHANGES_CAP, build_changes_list, changes_fields  # noqa: F401
+
+_build_changes_list = build_changes_list
+_changes_fields = changes_fields
 
 
-def _changes_fields(entries: list) -> dict:
-    """Cap a sorted change set for the response, disclosing what was cut.
+def _iso_mtimes(mtimes_by_relpath: dict, raw_files: dict) -> dict:
+    """jdoc#136: {doc_path: naive-local ISO string} for the files being saved.
 
-    A plain head cut: deleted entries sort last, so they are dropped first.
-    The `deleted` count field is the authority for deletions, as the
-    `new` / `changed` counts are for theirs.
+    ⚠ Scoped to `raw_files`, the documents this pass actually wrote. Passing the
+    whole walk would record a time for a file the pass skipped, which reads as
+    "indexed at" for something that was not.
     """
-    return {
-        "changes": entries[:CHANGES_CAP],
-        "changes_total": len(entries),
-        "changes_truncated": len(entries) > CHANGES_CAP,
-    }
-
-
-def _build_changes_list(
-    new: list,
-    changed: list,
-    deleted: list,
-    mtimes_by_relpath: dict,
-) -> list:
-    """Build the file change set for the index_local response.
-
-    Returns one entry per affected file:
-      {"doc_path": str, "status": "new"|"changed"|"deleted",
-       "mtime": ISO 8601 string | None}
-
-    Sorted by mtime descending. Entries without an mtime (deleted files, or
-    a file whose mtime is missing) come last. doc_path ascending breaks
-    ties, so the order is stable.
-    """
-    entries: list = []
-    for dp in new:
+    out: dict = {}
+    for dp in raw_files:
         mt = mtimes_by_relpath.get(dp)
-        iso = datetime.fromtimestamp(mt).isoformat() if mt is not None else None
-        entries.append({"doc_path": dp, "status": "new", "mtime": iso})
-    for dp in changed:
-        mt = mtimes_by_relpath.get(dp)
-        iso = datetime.fromtimestamp(mt).isoformat() if mt is not None else None
-        entries.append({"doc_path": dp, "status": "changed", "mtime": iso})
-    for dp in deleted:
-        entries.append({"doc_path": dp, "status": "deleted", "mtime": None})
-
-    dated = [e for e in entries if e["mtime"] is not None]
-    undated = [e for e in entries if e["mtime"] is None]
-    # Two stable sorts: doc_path ascending first, then mtime descending.
-    dated.sort(key=lambda e: e["doc_path"])
-    dated.sort(key=lambda e: e["mtime"], reverse=True)
-    undated.sort(key=lambda e: e["doc_path"])
-    return dated + undated
+        if mt is not None:
+            out[dp] = datetime.fromtimestamp(mt).isoformat()
+    return out
 
 
 def discover_doc_files(
@@ -2636,6 +2604,9 @@ def index_local(
                 owner=owner, name=repo_name,
                 changed_files=changed, new_files=new, deleted_files=deleted,
                 new_sections=new_sections, raw_files=raw_subset, doc_types=doc_types,
+                # jdoc#136: the walk already read every mtime for `changes`;
+                # persisting the touched ones is what makes list_docs work.
+                file_mtimes=_iso_mtimes(mtimes_by_relpath, raw_subset),
                 head_sha=head_sha,
                 source_dirty=source_dirty,
                 sha_certified=sha_certified,
@@ -2807,6 +2778,7 @@ def index_local(
             sections=all_sections,
             raw_files=raw_files,
             doc_types=doc_types,
+            file_mtimes=_iso_mtimes(mtimes_by_relpath, raw_files),
             head_sha=head_sha,
             source_dirty=source_dirty,
             sha_certified=sha_certified,

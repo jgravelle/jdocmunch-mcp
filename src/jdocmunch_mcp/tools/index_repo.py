@@ -18,6 +18,13 @@ from ._embedding_coverage import attach_embedding_coverage as _attach_embedding_
 from ._constants import SKIP_PATTERNS, is_skipped_dot_dir
 
 
+from ._changes import (  # jdoc#135
+    build_changes_list,
+    changes_fields,
+    normalize_commit_date,
+)
+
+
 def parse_github_url(url: str) -> tuple:
     """Extract (owner, repo) from GitHub URL or owner/repo string."""
     url = url.removesuffix(".git")
@@ -59,6 +66,47 @@ def _should_skip(path: str, include_dot_dirs=None) -> bool:
     return any(is_skipped_dot_dir(c, include_dot_dirs) for c in components)
 
 
+async def fetch_head_commit(
+    owner: str,
+    repo: str,
+    token: Optional[str] = None,
+    client: Optional[httpx.AsyncClient] = None,
+    ref: str = "HEAD",
+) -> tuple:
+    """Fetch a commit's SHA and date in one request.
+
+    Returns ``(sha, date)``; either may be None.
+
+    ⚠ jdoc#135: the date was ALREADY in this response and was being discarded.
+    `commit.committer.date` costs no extra request and no rate-limit budget.
+    ⚠ `committer.date` rather than `author.date`: the question a reader is
+    asking is when the content was published, not when it was written.
+    """
+    ref_path = quote(ref, safe="")
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref_path}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    def _read(payload: dict) -> tuple:
+        sha = normalize_commit_sha(payload.get("sha"))
+        commit = payload.get("commit") or {}
+        committer = commit.get("committer") or {}
+        return sha, normalize_commit_date(committer.get("date"))
+
+    try:
+        if client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return _read(response.json())
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            response = await c.get(url, headers=headers)
+            response.raise_for_status()
+            return _read(response.json())
+    except Exception:
+        return None, None
+
+
 async def fetch_head_commit_sha(
     owner: str,
     repo: str,
@@ -66,23 +114,13 @@ async def fetch_head_commit_sha(
     client: Optional[httpx.AsyncClient] = None,
     ref: str = "HEAD",
 ) -> Optional[str]:
-    """Fetch a commit SHA cheaply (single lightweight request)."""
-    ref_path = quote(ref, safe="")
-    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref_path}"
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    if token:
-        headers["Authorization"] = f"token {token}"
-    try:
-        if client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return normalize_commit_sha(response.json().get("sha"))
-        async with httpx.AsyncClient(timeout=15.0) as c:
-            response = await c.get(url, headers=headers)
-            response.raise_for_status()
-            return normalize_commit_sha(response.json().get("sha"))
-    except Exception:
-        return None
+    """Fetch a commit SHA cheaply (single lightweight request).
+
+    ⚠ Kept as the SHA-only spelling so existing callers and tests are unchanged;
+    `fetch_head_commit` is the one that also returns the date.
+    """
+    sha, _ = await fetch_head_commit(owner, repo, token, client, ref)
+    return sha
 
 
 async def fetch_repo_tree(
@@ -284,6 +322,9 @@ async def index_repo(
                         "source_dirty": False,
                         "sha_certified": True,
                         "changed": 0, "new": 0, "deleted": 0,
+                        # #132's rule: every success shape carries the keys, so
+                        # nobody branches on whether they are present.
+                        **changes_fields([]),
                         "_meta": {"latency_ms": latency_ms},
                     }
                     if updated.repo_at_sha:
@@ -298,7 +339,7 @@ async def index_repo(
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Resolve the requested ref once, then fetch all content at that SHA.
-            head_sha = await fetch_head_commit_sha(
+            head_sha, head_commit_date = await fetch_head_commit(
                 owner,
                 source_repo,
                 github_token,
@@ -391,6 +432,7 @@ async def index_repo(
                     "source_dirty": False,
                     "sha_certified": sha_certified,
                     "changed": 0, "new": 0, "deleted": 0,
+                    **changes_fields([]),
                     "_meta": {"latency_ms": latency_ms},
                 }
                 if head_sha:
@@ -434,10 +476,17 @@ async def index_repo(
                     owner=owner, name=index_name, storage_path=storage_path,
                 )
 
+            # jdoc#135: a repository has no per-file mtime — a checkout stamps
+            # every file with the fetch moment. The commit is its only edit
+            # event, so every file this pass touched takes the head commit date.
+            repo_mtimes = (
+                {dp: head_commit_date for dp in raw_subset} if head_commit_date else {}
+            )
             updated = store.incremental_save(
                 owner=owner, name=index_name,
                 changed_files=changed, new_files=new, deleted_files=deleted,
                 new_sections=new_sections, raw_files=raw_subset, doc_types=doc_types,
+                file_mtimes=repo_mtimes,
                 head_sha=head_sha, source_dirty=False, sha_certified=sha_certified,
                 source_repo=source_repo_id,
             )
@@ -448,6 +497,7 @@ async def index_repo(
                 "repo": repo_id,
                 "incremental": True,
                 "changed": len(changed), "new": len(new), "deleted": len(deleted),
+                **changes_fields(build_changes_list(new, changed, deleted, repo_mtimes)),
                 "section_count": len(updated.sections) if updated else 0,
                 "indexed_at": updated.indexed_at if updated else "",
                 "semantic_search": use_embeddings and get_provider_name() is not None,
@@ -503,12 +553,16 @@ async def index_repo(
                 prune=True,
             )
 
+        full_repo_mtimes = (
+            {dp: head_commit_date for dp in raw_files} if head_commit_date else {}
+        )
         saved = store.save_index(
             owner=owner,
             name=index_name,
             sections=all_sections,
             raw_files=raw_files,
             doc_types=doc_types,
+            file_mtimes=full_repo_mtimes,
             head_sha=head_sha,
             sha_certified=sha_certified,
             source_repo=source_repo_id,
@@ -523,6 +577,9 @@ async def index_repo(
             "section_count": len(all_sections),
             "doc_types": doc_types,
             "files": parsed_files[:20],
+            **changes_fields(
+                build_changes_list(sorted(raw_files), [], [], full_repo_mtimes)
+            ),
             "semantic_search": use_embeddings and get_provider_name() is not None,
             "source_dirty": False,
             "sha_certified": sha_certified,

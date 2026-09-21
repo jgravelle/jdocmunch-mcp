@@ -49,6 +49,13 @@ def list_docs(
 
     docs: list = []
     total_bytes = 0
+    with_mtime = 0
+    # jdoc#136: the STORED time, not a stat. `byte_size` below stats every
+    # document anyway, so a live mtime would be free and fresher — and it would
+    # make this key mean filesystem-time on a local index and commit-time on a
+    # repository one. One index, one meaning; the value is as of the last
+    # indexing pass, which is the same pass that updated the hash beside it.
+    mtimes = index.file_mtimes or {}
     content_dir = store._content_dir(owner, name)
     for dp, n in counts.items():
         ext = os.path.splitext(dp)[1].lower()
@@ -60,12 +67,19 @@ def list_docs(
         except OSError:
             size = 0
         total_bytes += size
-        docs.append({
+        entry = {
             "doc_path": dp,
             "section_count": n,
             "format": ext or None,
             "byte_size": size,
-        })
+        }
+        # ⚠ Omitted, never null: an absent key means the time could not be
+        # established, which is not the same claim as "this document is old".
+        mt = mtimes.get(dp)
+        if mt:
+            entry["mtime"] = mt
+            with_mtime += 1
+        docs.append(entry)
 
     docs.sort(key=lambda d: d["doc_path"])
 
@@ -78,5 +92,11 @@ def list_docs(
         "_meta": {
             "latency_ms": int((time.perf_counter() - t0) * 1000),
             "indexed_at": index.indexed_at,
+            # jdoc#136. ⚠⚠ Always present, including as 0. Without a count, an
+            # index written before this change, one where nothing has a recorded
+            # time, and a partially filled one are indistinguishable to a caller
+            # — a number computed and then withheld is the same defect as not
+            # computing it. Compare against `doc_count` to tell the three apart.
+            "docs_with_mtime": with_mtime,
         },
     }

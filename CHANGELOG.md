@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+### Added - document recency: `index_repo` change set, and `mtime` on `list_docs`
+
+Closes #135 and #136, both designed by
+[@whakomatic](https://github.com/whakomatic) on #134, follow-ups to #132.
+
+`index_repo` now returns `changes`, `changes_total` and `changes_truncated` on
+every success path, built by the same helpers `index_local` uses — moved to
+`tools/_changes.py` so the ordering, the 50-entry cap and the truncation
+disclosure are one implementation rather than two that drift.
+
+A repository has no per-file modification time. Git stores none in a tree
+object, and a checkout stamps every file with the moment it was fetched, which
+says nothing about when anything was edited. The commit is a repository's only
+edit event, and the date was already being fetched and thrown away:
+`fetch_head_commit_sha` read `sha` from `GET /repos/{owner}/{repo}/commits/{ref}`
+and discarded `commit.committer.date` sitting beside it. So the date costs no
+extra request and no rate-limit budget.
+
+Each document's time is now stored in the index, by all three indexing tools,
+and `list_docs` returns it as `mtime` per document — omitted, never null, when
+none is known. `_meta.docs_with_mtime` says how many carry one, so a partially
+filled index, an index written before this change, and a complete one are
+distinguishable rather than looking identical.
+
+⚠⚠ **The two producers render time differently and a caller must read the
+offset.** `index_local` emits naive local time (`2026-09-18T14:18:02`), matching
+`indexed_at`; that shipped in 1.142.0 and cannot change on 1.x. `index_repo`
+emits an offset-aware string (`2026-09-20T13:15:39+00:00`). Comparing the two
+without reading the offset is wrong by the local UTC offset. Both tool
+descriptions say so.
+
+⚠⚠ **Never a bare `Z`.** `datetime.fromisoformat` gained `Z` support in 3.11 and
+this package supports 3.10, which is in the CI matrix. Measured on 3.10.11,
+`'2026-09-20T13:15:39Z'` raises `ValueError: Invalid isoformat string` while
+`+00:00` parses. **No developer box newer than 3.10 can see that failure**, so
+`normalize_commit_date` converts GitHub's `Z` rather than passing it through.
+
+⚠ `list_docs` reads the **stored** time, not a `stat()`. It already stats every
+document for `byte_size`, so a live time would be free and fresher — and it
+would make `mtime` mean filesystem-time on a local index and commit-time on a
+repository one. One index, one meaning.
+
+⚠ `index_file` is unchanged as an interface and stores its one file's time, so
+the PostToolUse edit hook keeps the most recently edited document current. It
+gains no `changes` list: that would be one entry whose path the caller supplied
+and whose status is already in `is_new`.
+
+Measured cost of the new key, since an unbounded list on 1.x cannot be bounded
+later: **+30 bytes per document**, +29.6% on a 125-document index and +8,130 B
+on a 271-document one. `list_docs` is uncapped and jdoc has no response ceiling,
+so nothing refuses.
+
+⚠ `DocIndex.file_mtimes` had to be named in `_index_to_dict`, which is an
+explicit allow-list and not `asdict()`: a field added to the dataclass and to
+every save/load signature still round-trips as empty until it appears there.
+Additive: no key renamed or removed, no parameter added, `INDEX_VERSION`
+unchanged, and an index written before this reads back as `{}`.
+
+`tests/test_jdoc_135_136_document_recency.py` (14). Proven non-vacuous — with
+the serializer line removed, 5 of them fail.
+
 ## [1.143.0] - 2026-09-19 - init asks once about semantic search
 
 ### Added - `init` asks once whether to turn semantic search on
