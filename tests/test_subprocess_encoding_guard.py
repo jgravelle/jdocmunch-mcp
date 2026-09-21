@@ -30,8 +30,24 @@ test rather than a habit:
 index at all.
 
 The rule: any call to ``run``/``Popen``/``check_output``/``check_call``/``call``
-that passes ``text=`` or ``universal_newlines=`` must also pass ``encoding=``.
-``errors="replace"`` alongside it is the house default.
+that passes ``text=`` or ``universal_newlines=`` must also pass **both**
+``encoding=`` and ``errors=``.
+
+⚠⚠ **``encoding="utf-8"`` ALONE DOES NOT CLOSE THIS, and until now the
+assertion accepted it while the failure message asked for both.** Naming the
+encoding only changes *which* codec raises. A child that emits a byte that is
+not valid UTF-8 — any tool passing through a path it did not decode — produces
+the identical failure described above. Measured on this box against a child
+writing ``b"ok-\\x9d-end\\n"``::
+
+    text=True                                   stdout=None, UnicodeDecodeError
+                                                ('charmap') in Thread-3
+    text=True, encoding="utf-8"                 stdout=None, UnicodeDecodeError
+                                                ('utf-8') in Thread-3
+    text=True, encoding="utf-8", errors="replace"   stdout='ok-\\ufffd-end\\n'
+
+Only ``errors=`` keeps the reader thread alive and ``stdout`` non-``None``. So
+the kwarg that actually prevents the incident was the one not being enforced.
 
 ⚠ **This is invisible to CI and to any UTF-8 development box.** CI is Linux.
 The convention cannot be maintained by noticing, which is what the sweep that
@@ -57,8 +73,20 @@ GUARDED_TREES = ("src", "scripts", "benchmarks", "contrib")
 # a tree is a decision and not an oversight.
 EXEMPT_TREES = ("tests", "unused")
 
+# `unused/` is not tracked: it does not exist on a fresh clone, and the one
+# thing that creates it is a side effect of another test
+# (`DocStore(base_path="unused")` in test_issue95_qa19). An exempt tree is
+# therefore allowed to be absent only if it is named here, so this file passes
+# alone, in any order, and a tracked tree that disappears still fails.
+EXEMPT_MAY_BE_ABSENT = ("unused",)
+
 SUBPROCESS_FUNCS = {"run", "Popen", "check_output", "check_call", "call"}
 TEXT_KWARGS = {"text", "universal_newlines"}
+
+# Both are required. `encoding` alone leaves the reader thread able to raise —
+# see the measurement in the module docstring. Order is the order they are
+# reported in, so a message reads the way the fix should be typed.
+REQUIRED_KWARGS = ("encoding", "errors")
 
 # KNOWN GAP — a ratchet, not an exemption. Empty as of v1.121.1, when all 9
 # offending call sites were fixed. Kept (empty) rather than deleted: it is the
@@ -77,26 +105,32 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
-def _offenders_in_source(source: str, label: str) -> list[str]:
-    """Return "label:lineno" for each text-mode call with no encoding."""
+def _offenders_in_source(source: str, label: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Return ``(site, missing)`` for each text-mode call missing a required kwarg.
+
+    ``site`` stays the bare ``"label:lineno"`` that ``KNOWN_UNENCODED`` is keyed
+    on, so declaring a gap does not mean transcribing which kwargs it was
+    missing — that detail belongs in the failure message, not in the key.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return []
-    out = []
+    out: list[tuple[str, tuple[str, ...]]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or _call_name(node) not in SUBPROCESS_FUNCS:
             continue
         kwargs = {k.arg for k in node.keywords if k.arg}
         if not (kwargs & TEXT_KWARGS):
             continue
-        if "encoding" in kwargs:
+        missing = tuple(k for k in REQUIRED_KWARGS if k not in kwargs)
+        if not missing:
             continue
-        out.append(f"{label}:{node.lineno}")
+        out.append((f"{label}:{node.lineno}", missing))
     return out
 
 
-def _offenders_in(path: pathlib.Path) -> list[str]:
+def _offenders_in(path: pathlib.Path) -> list[tuple[str, tuple[str, ...]]]:
     return _offenders_in_source(
         path.read_text(encoding="utf-8", errors="replace"),
         path.relative_to(REPO_ROOT).as_posix(),
@@ -112,8 +146,8 @@ def _guarded_files() -> list[pathlib.Path]:
     return files
 
 
-def _all_offenders() -> list[str]:
-    found: list[str] = []
+def _all_offenders() -> list[tuple[str, tuple[str, ...]]]:
+    found: list[tuple[str, tuple[str, ...]]] = []
     for path in _guarded_files():
         found.extend(_offenders_in(path))
     return found
@@ -127,18 +161,22 @@ def test_guarded_trees_exist():
 
 
 def test_no_text_mode_subprocess_without_encoding():
-    offenders = [o for o in _all_offenders() if o not in KNOWN_UNENCODED]
+    offenders = [o for o in _all_offenders() if o[0] not in KNOWN_UNENCODED]
     assert not offenders, (
-        "text-mode subprocess call with no encoding= — decodes git output with "
-        "the platform default (cp1252 on Windows) and dies in subprocess's "
-        "reader thread on any non-ASCII byte. Add "
-        'encoding="utf-8", errors="replace":\n  ' + "\n  ".join(offenders)
+        "text-mode subprocess call missing a required kwarg — decodes the "
+        "child's output with the platform default (cp1252 on Windows), and "
+        "raises in subprocess's reader thread on any byte the codec rejects, "
+        "where no try/except around the call can catch it. stdout then comes "
+        "back None. ⚠ encoding= alone is NOT enough: it only changes which "
+        'codec raises. Add encoding="utf-8", errors="replace":\n  '
+        + "\n  ".join(f"{site}  missing {', '.join(missing)}"
+                      for site, missing in offenders)
     )
 
 
 def test_known_gap_does_not_rot():
     """A listed gap that is actually fixed must be removed from the list."""
-    live = set(_all_offenders())
+    live = {site for site, _ in _all_offenders()}
     stale = KNOWN_UNENCODED - live
     assert not stale, (
         "KNOWN_UNENCODED lists call sites that are now compliant; delete them "
@@ -149,7 +187,10 @@ def test_known_gap_does_not_rot():
 def test_exempt_trees_are_named_not_forgotten():
     """The exemption is a decision on the record, and it must not overlap scope."""
     assert not (set(EXEMPT_TREES) & set(GUARDED_TREES))
+    assert set(EXEMPT_MAY_BE_ABSENT) <= set(EXEMPT_TREES)
     for tree in EXEMPT_TREES:
+        if tree in EXEMPT_MAY_BE_ABSENT:
+            continue
         assert (REPO_ROOT / tree).is_dir(), f"exempt tree {tree!r} does not exist"
 
 
@@ -158,7 +199,11 @@ def test_exempt_trees_are_named_not_forgotten():
     [
         ('subprocess.run(["git"], text=True)', 1),
         ('subprocess.run(["git"], universal_newlines=True)', 1),
-        ('subprocess.run(["git"], text=True, encoding="utf-8")', 0),
+        # ⚠ WAS 0 UNTIL THE errors= TIGHTENING. This row is the whole change:
+        # the guard used to accept the form that still crashes.
+        ('subprocess.run(["git"], text=True, encoding="utf-8")', 1),
+        ('subprocess.run(["git"], text=True, errors="replace")', 1),
+        ('subprocess.run(["git"], text=True, encoding="utf-8", errors="replace")', 0),
         ('subprocess.Popen(["git"], text=True)', 1),
         ('subprocess.check_output(["git"], text=True)', 1),
         ('run(["git"], text=True)', 1),
@@ -171,3 +216,22 @@ def test_detector_is_not_vacuous(source, expected_hits):
     a known-bad input passes forever. This drives the SAME function the
     repo-wide check uses, so the two cannot diverge."""
     assert len(_offenders_in_source(source, "sample.py")) == expected_hits
+
+
+@pytest.mark.parametrize(
+    "source,missing",
+    [
+        ('subprocess.run(["git"], text=True)', ("encoding", "errors")),
+        ('subprocess.run(["git"], text=True, encoding="utf-8")', ("errors",)),
+        ('subprocess.run(["git"], text=True, errors="replace")', ("encoding",)),
+    ],
+)
+def test_the_message_names_which_kwarg_is_missing(source, missing):
+    """A guard that says "something is wrong here" costs a reader the diagnosis.
+
+    Pinned separately from the hit COUNT because the count cannot distinguish
+    "missing both" from "missing errors", which is exactly the distinction the
+    tightening introduced.
+    """
+    found = _offenders_in_source(source, "sample.py")
+    assert [m for _, m in found] == [missing]
