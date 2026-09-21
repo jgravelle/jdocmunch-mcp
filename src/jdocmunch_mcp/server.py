@@ -513,7 +513,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="doc_index_repo",
-            description="Index a GitHub repository's documentation. Fetches .md/.txt files, parses sections, and saves to local storage. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Indexes .md and .txt only; every other file in the repo is ignored.",
+            description="Index a GitHub repository's documentation. Fetches .md/.txt files, parses sections, and saves to local storage. Embeddings auto-enable when a provider is configured (GOOGLE_API_KEY, OPENAI_API_KEY, openai-compatible + JDOCMUNCH_OPENAI_COMPAT_URL + JDOCMUNCH_OPENAI_COMPAT_MODEL, or sentence-transformers). Indexes .md and .txt only; every other file in the repo is ignored. Returns `changes` on every success path (at most 50 entries, newest first) with `changes_total` and `changes_truncated` beside it; the new/changed/deleted counts are the authority, not len(changes). Each entry's `mtime` is the head COMMIT date, offset-aware (e.g. 2026-09-20T13:15:39+00:00), because a repository has no per-file modification time. index_local's `mtime` is naive local time instead, so read the offset before comparing times across the two.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -591,7 +591,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="list_docs",
-            description="v1.55+ — flat per-doc inventory of an indexed repo: doc_path, section_count, format, byte_size for each indexed document. Lighter than get_toc_tree (which returns full section trees per doc). Sorted by doc_path. Inventory only; it returns no section titles and no content.",
+            description="v1.55+ — flat per-doc inventory of an indexed repo: doc_path, section_count, format, byte_size for each indexed document. Lighter than get_toc_tree (which returns full section trees per doc). Sorted by doc_path. Inventory only; it returns no section titles and no content. Each doc also carries `mtime` when one is known — as of the last indexing pass, omitted when unknown rather than null — and `_meta.docs_with_mtime` says how many have one, so a partially filled or pre-1.144 index is distinguishable from a complete one.",
             inputSchema={
                 "type": "object",
                 "properties": {

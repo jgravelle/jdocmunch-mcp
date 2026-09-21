@@ -103,6 +103,20 @@ def _resolve_named_index(
     return (owner, bare, rel_path, source_root)
 
 
+def _stat_mtime(file_path, rel_path: str) -> dict:
+    """jdoc#136: {rel_path: naive-local ISO string}, or {} when it cannot be read.
+
+    ⚠ An empty dict leaves whatever was stored alone — `incremental_save` only
+    writes the keys it is given. Returning a fabricated "now" would record the
+    indexing moment as the edit moment.
+    """
+    from datetime import datetime
+    try:
+        return {rel_path: datetime.fromtimestamp(Path(file_path).stat().st_mtime).isoformat()}
+    except OSError:
+        return {}
+
+
 def index_file(
     file_path: str,
     storage_path: Optional[str] = None,
@@ -233,6 +247,10 @@ def index_file(
         new_sections=new_sections,
         raw_files={rel_path: content},
         doc_types={ext: 1},
+        # jdoc#136: this tool is what the PostToolUse edit hook fires, so it is
+        # the path that keeps the most recently edited document current. A stat
+        # that fails leaves the stored time alone rather than clearing it.
+        file_mtimes=_stat_mtime(file_path, rel_path),
         head_sha=head_sha,
         source_dirty=source_dirty,
         sha_certified=sha_certified,
