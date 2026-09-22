@@ -21,6 +21,42 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-09-21 — v1.141.0
+
+Moved out of `CLAUDE.md` on 2026-09-21 when v1.144.0 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first: a
+CLI subcommand named by installed configs is a 1.x promise, a ratchet catches
+only the shape it names, and a claim about the host is not testable from this
+suite.
+
+## v1.141.0 — #131: the snapshot moves to the event that can deliver it
+
+**`run_precompact` wrote the session snapshot as a top-level `systemMessage`
+on PreCompact, which Claude Code discards.** 1.73.0 through 1.140.0: computed
+on every compaction, received by nobody. Same class as #129, one event over.
+Now `run_sessionstart` + `hook-sessionstart` + a `SessionStart` entry with
+matcher `compact|resume|fork`, emitting `additionalContext`. Silent on
+`startup`/`clear` on purpose — a fresh session has no prior doc state and the
+snapshot would present unrelated repos as current focus. Ported from jcm's
+`hooks/snapshot.py::run_sessionstart`, same labels, same gate.
+
+⚠⚠ **`hook-precompact` STAYS as a silent no-op.** Every installed
+`settings.json` names it; deleting the subcommand turns every compaction into
+a hook error on every existing install. The 1.x contract names MCP tools, and
+a CLI subcommand that a config file invokes is the same kind of promise.
+⚠ **Existing installs get SessionStart only by re-running `init`** — the
+merge adds the missing event beside PreCompact (`test_init_adds_sessionstart_
+beside_an_existing_precompact_entry`). ⚠ **No test here can prove Claude Code
+delivers `additionalContext` on SessionStart** — that is a claim about the
+host, taken from jcm's measured hooks and Claude Code's docs, not from this
+suite.
+
+`tests/test_jdoc_131_sessionstart_snapshot.py` (16). The `systemMessage`
+ratchet walks the AST of all four handlers for the string constant; proven
+non-vacuous with the old line restored (2 of 16 fail). ⚠ The #129 ratchet is
+scoped to `run_pretooluse` and would NOT have caught this — a ratchet catches
+the shape it names and nothing adjacent, which is why this file has its own.
+
 ## Rotated 2026-09-19 — v1.140.0
 
 Moved out of `CLAUDE.md` on 2026-09-19 when v1.143.0 became a fourth dated

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.144.0] - 2026-09-21 - a repository's documents had no time, and the commit date was already in hand
 
 ### Added - document recency: `index_repo` change set, and `mtime` on `list_docs`
 

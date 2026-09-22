@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.143.0 |
+**Version:** 1.144.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,59 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.144.0 — #135/#136: a repository's documents had no time, and the commit date was already in hand
+
+**`index_repo` returned counts where `index_local` returns a change set, and no
+index stored a per-document time at all.** Now `changes` / `changes_total` /
+`changes_truncated` on every `index_repo` success path, and `mtime` per document
+on `list_docs` with `_meta.docs_with_mtime` beside it. Both designed by
+@whakomatic on #134, split to #135/#136 under policy 1, merged as `c61810f`.
+
+⚠⚠ **The two producers render time differently, and the key is the same key.**
+`index_local` emits naive local time, matching `indexed_at`; that shipped in
+1.142.0 and cannot change on 1.x. `index_repo` emits an offset-aware string. A
+caller comparing across a local index and a repository one without reading the
+offset is wrong by the local UTC offset. Resolved on the NEW producer, since the
+old one's format is already a promise; both tool descriptions say so.
+
+⚠⚠ **Never write a bare `Z`. `datetime.fromisoformat` gained `Z` in 3.11 and
+this package supports 3.10.** Measured on 3.10.11, `'...T13:15:39Z'` raises
+`ValueError: Invalid isoformat string` where `+00:00` parses. **No developer box
+newer than 3.10 can see it** — only the oldest matrix job fails — so
+`normalize_commit_date` converts GitHub's string rather than passing it through.
+⚠ The date cost NO extra request: `fetch_head_commit_sha` was already reading
+`GET /repos/{owner}/{repo}/commits/{ref}` and discarding `commit.committer.date`
+sitting beside `sha`. `fetch_head_commit` returns both; the sha-only spelling
+stays as a wrapper.
+
+⚠⚠ **`_index_to_dict` is an explicit ALLOW-LIST, not `asdict()`.** A field
+added to the dataclass AND to every save/load signature still round-trips as
+empty until it is named there, and nothing raises. `tests/test_jdoc_116_corpus_
+shape_inheritance.py` already records that this cost a debugging cycle once, so
+`file_mtimes` has its own test reading the JSON on disk rather than the dataclass.
+
+⚠ **A repository has no per-file modification time**, which is why this is the
+commit date and not a `stat()`. Git stores none in a tree object and a checkout
+stamps every file with the moment it was fetched. ⚠ `list_docs` reads the STORED
+time even though it already stats every document for `byte_size`: a live time
+would be fresher and would make `mtime` mean filesystem-time on a local index
+and commit-time on a repository one. One index, one meaning.
+
+⚠ Measured before merge, per #132's own lesson: **+30 bytes per document, flat**
+— +29.6% on a 125-document index, +8,130 B on 271. `list_docs` is uncapped and
+jdoc has no response ceiling, so nothing refuses; it grows with the corpus.
+
+⚠ **The test stubs had to follow the seam.** 16 patch sites in
+`tests/test_index_repo_sha.py` stubbed `fetch_head_commit_sha`, which no longer
+issues the request — so the real HTTP call was live and those tests were passing
+for the wrong reason. A `_patch_head` adapter stubs both names and reuses every
+existing fake unchanged.
+
+`tests/test_jdoc_135_136_document_recency.py` (14), proven non-vacuous: remove
+the serializer line and 5 fail. No tool, schema or INDEX_VERSION change; an index
+written before this reads back as `{}`. All 12 CI jobs green on `b696111` before
+the merge.
 
 ## v1.143.0 — `init` asks once about semantic search; the default install was words-only
 
@@ -93,35 +146,7 @@ Request-changes to fixed head took under a day inside the 24-hour timebox;
 fork owner is a `User`, so our push was available and not needed.
 `tests/test_file_recency.py` (8). No tool, schema or INDEX_VERSION change.
 
-## v1.141.0 — #131: the snapshot moves to the event that can deliver it
-
-**`run_precompact` wrote the session snapshot as a top-level `systemMessage`
-on PreCompact, which Claude Code discards.** 1.73.0 through 1.140.0: computed
-on every compaction, received by nobody. Same class as #129, one event over.
-Now `run_sessionstart` + `hook-sessionstart` + a `SessionStart` entry with
-matcher `compact|resume|fork`, emitting `additionalContext`. Silent on
-`startup`/`clear` on purpose — a fresh session has no prior doc state and the
-snapshot would present unrelated repos as current focus. Ported from jcm's
-`hooks/snapshot.py::run_sessionstart`, same labels, same gate.
-
-⚠⚠ **`hook-precompact` STAYS as a silent no-op.** Every installed
-`settings.json` names it; deleting the subcommand turns every compaction into
-a hook error on every existing install. The 1.x contract names MCP tools, and
-a CLI subcommand that a config file invokes is the same kind of promise.
-⚠ **Existing installs get SessionStart only by re-running `init`** — the
-merge adds the missing event beside PreCompact (`test_init_adds_sessionstart_
-beside_an_existing_precompact_entry`). ⚠ **No test here can prove Claude Code
-delivers `additionalContext` on SessionStart** — that is a claim about the
-host, taken from jcm's measured hooks and Claude Code's docs, not from this
-suite.
-
-`tests/test_jdoc_131_sessionstart_snapshot.py` (16). The `systemMessage`
-ratchet walks the AST of all four handlers for the string constant; proven
-non-vacuous with the old line restored (2 of 16 fail). ⚠ The #129 ratchet is
-scoped to `run_pretooluse` and would NOT have caught this — a ratchet catches
-the shape it names and nothing adjacent, which is why this file has its own.
-
-## Lessons from rotated entries (v1.116.0–v1.140.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19)
+## Lessons from rotated entries (v1.116.0–v1.141.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -198,6 +223,20 @@ entry that earned no reusable rule got no line.
   it; warmup then blocks on a download that reaches the user as "connection timed
   out". **Guessing "cached" is the harmful guess; "not cached" costs a deferred
   load.** (v1.137.0)
+- ⚠⚠ **A CLI subcommand that an installed config file invokes is the same
+  kind of 1.x promise as an MCP tool.** `hook-precompact` became a silent no-op
+  rather than being deleted: every installed `settings.json` names it, so
+  removing it turns every compaction into a hook error on every existing
+  install. ⚠ The corollary is that existing installs do NOT get a newly added
+  hook EVENT until `init` is re-run. (v1.141.0)
+- ⚠⚠ **A ratchet catches the shape it NAMES and nothing adjacent.** The #129
+  ratchet was scoped to `run_pretooluse`, so it walked straight past the same
+  defect one handler over in `run_precompact` — which is why each fix gets its
+  own ratchet instead of trusting the neighbouring one. (v1.141.0)
+- ⚠ **A claim about the HOST cannot be tested from this suite.** Nothing here
+  can prove Claude Code delivers `additionalContext` on SessionStart; that rests
+  on jcm's measured hooks and Claude Code's docs, and the brief must say which.
+  (v1.141.0)
 - ⚠⚠ **An exit-0 hook has ONE model-facing channel per event, and it differs
   by event.** stderr goes to the debug log. Plain stdout reaches the model only
   on UserPromptSubmit / SessionStart-class events. Top-level `systemMessage`
@@ -919,7 +958,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.140.0 and v1.139.1 rotated there 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.141.0 rotated there 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 

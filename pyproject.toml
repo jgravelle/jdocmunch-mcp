@@ -1,6 +1,6 @@
 [project]
 name = "jdocmunch-mcp"
-version = "1.143.0"
+version = "1.144.0"
 description = "Token-efficient MCP server for structured documentation retrieval via section-level indexing"
 readme = "README.md"
 requires-python = ">=3.10"
