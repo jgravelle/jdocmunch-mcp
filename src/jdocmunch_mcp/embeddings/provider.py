@@ -950,6 +950,35 @@ def embed_sections(
     # An empty write is therefore meaningful when the on-disk identity does not
     # match: it is how the old vectors get purged. Only skip the write when
     # there is nothing to say AND nothing stale to retract.
+    if cache_enabled and not prune:
+        # jdoc#141: when the sidecar on disk already carries THIS identity,
+        # the rewrite below would write back every cached row plus this
+        # pass's new ones. That is the same key set an append produces, at
+        # the cost of rewriting the whole file (5.6 s on a reporter's 279 MB
+        # sidecar). ⚠⚠ Only on a matching identity: on a rotation (#109) or
+        # a missing sidecar the rewrite is what retracts old vectors or
+        # writes the header, so those fall through unchanged. `prune` (#107)
+        # also falls through, because it must DROP rows.
+        from . import cache as _cache
+        # ⚠ `cached` non-empty too: a matching header whose body `load`
+        # could not read (or an empty file) is cheap to rewrite, and the
+        # rewrite repairs it where an append would build on top of it.
+        if cached and _cache.identity_matches(
+            _cache.identity(storage_path, owner, name),
+            provider_name, model, dim, chars,
+        ):
+            rows = []
+            for sec in sections:
+                k = _embed_cache_key(sec)
+                vec = getattr(sec, "embedding", None)
+                if k and vec and cached.get(k) != list(vec):
+                    rows.append((k, list(vec)))
+            try:
+                _cache.append_rows(storage_path, owner, name, rows)
+            except Exception:
+                pass
+            return sections
+
     if cache_enabled:
         from . import cache as _cache
         entries: dict = {} if prune else dict(cached)

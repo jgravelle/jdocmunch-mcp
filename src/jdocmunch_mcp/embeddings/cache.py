@@ -326,6 +326,47 @@ def append_entries(
         return len(pending)
 
 
+def append_rows(
+    base_path: Optional[str],
+    owner: str,
+    name: str,
+    rows: Iterable[tuple[str, list]],
+) -> int:
+    """Append rows to a sidecar whose header the caller has ALREADY matched (jdoc#141).
+
+    ``embed_sections`` uses this instead of :func:`write` when the sidecar's
+    identity matches and the pass is not pruning. In that case a rewrite
+    produces the same key set as an append, since ``entries`` starts from
+    every cached row, and it costs a full rewrite of the file.
+
+    Unlike :func:`append_entries` this does not rescan the file for existing
+    keys, because the caller already holds them from :func:`load`. A key that
+    is already present may be written again with a new vector. :func:`load`
+    keeps the LAST row for a key, so the newer one wins.
+
+    ⚠ A torn trailing line (a crash mid-append) is terminated first.
+    Otherwise the first new row would be glued onto the fragment, fail to
+    parse, and be dropped silently.
+    """
+    pending = [
+        (h, vec) for h, vec in rows
+        if isinstance(h, str) and h and isinstance(vec, list)
+    ]
+    if not pending:
+        return 0
+    path = _cache_path(base_path, owner, name)
+    with _CACHE_LOCK:
+        with path.open("ab+") as fh:
+            fh.seek(0, 2)
+            if fh.tell() > 0:
+                fh.seek(-1, 2)
+                if fh.read(1) != b"\n":
+                    fh.write(b"\n")
+            for h, vec in pending:
+                fh.write((json.dumps({"hash": h, "vector": vec}) + "\n").encode("utf-8"))
+    return len(pending)
+
+
 def purge(base_path: Optional[str], owner: str, name: str) -> bool:
     """Delete the cache for one index. Returns True on success."""
     try:
