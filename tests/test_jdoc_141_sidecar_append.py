@@ -91,21 +91,21 @@ def test_matching_identity_does_not_call_write(tmp_path, fake_provider, monkeypa
     assert calls == []
 
 
-def test_changed_vector_for_existing_key_is_appended_and_wins(tmp_path, fake_provider):
+def test_cached_key_that_misses_is_rewritten_and_wins(tmp_path, fake_provider):
+    """A key present in the sidecar can still be a MISS: an empty stored vector
+    is falsy, so the pass re-embeds it. The append must write the new vector
+    rather than skip the key as already present, or the vector is lost."""
     _embed([_Section(f"h{i:03d}") for i in range(10)], tmp_path)
     s = _Section("h003")
-    # Force a miss on an existing key with a different vector.
     key = emb_provider._embed_cache_key(s)
-    cached = emb_cache.load(str(tmp_path), "local", "corpus",
-                            provider="fake", model="fake-model", dim=DIM,
-                            embed_chars=emb_provider._embed_chars())
-    assert key in cached
-    s.embedding = [9.0] * DIM
-    emb_cache.append_rows(str(tmp_path), "local", "corpus", [(key, s.embedding)])
+    emb_cache.append_rows(str(tmp_path), "local", "corpus", [(key, [])])
+
+    _embed([s], tmp_path)
+
     reloaded = emb_cache.load(str(tmp_path), "local", "corpus",
                               provider="fake", model="fake-model", dim=DIM,
                               embed_chars=emb_provider._embed_chars())
-    assert reloaded[key] == [9.0] * DIM
+    assert reloaded[key] and reloaded[key] == s.embedding
 
 
 def test_torn_trailing_line_is_terminated_before_appending(tmp_path, fake_provider):

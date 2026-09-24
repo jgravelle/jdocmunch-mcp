@@ -963,6 +963,10 @@ def embed_sections(
         # ⚠ `cached` non-empty too: a matching header whose body `load`
         # could not read (or an empty file) is cheap to rewrite, and the
         # rewrite repairs it where an append would build on top of it.
+        # `load` already returns {} on an identity mismatch, so today the
+        # identity check below is implied by `cached`. It stays as the
+        # backstop if `load` ever becomes tolerant of a mismatched header,
+        # and no test can make it decide anything until then.
         if cached and _cache.identity_matches(
             _cache.identity(storage_path, owner, name),
             provider_name, model, dim, chars,
