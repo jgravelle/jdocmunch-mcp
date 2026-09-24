@@ -1002,6 +1002,31 @@ class DocStore:
         except (OSError, ValueError):
             return None
 
+    def raw_doc_bytes(self, owner: str, name: str, doc_paths) -> int:
+        """Bytes a caller would read to get these documents whole (jdoc#138).
+
+        The token-savings baseline for tools that answer from section
+        metadata. It used to sum ``content`` over loaded sections, but
+        ``Section.to_dict`` does not persist content for byte-addressed
+        sections, so after a reload that sum was 0 and ``tokens_saved``
+        was floored to 0 on every call. Sections partition a document, so
+        the cached file size is the same quantity the old sum meant.
+
+        Each distinct path is counted once. A path that is missing, escapes
+        the content dir or cannot be stat'ed counts 0, which can only
+        understate the saving.
+        """
+        content_dir = self._content_dir(owner, name)
+        total = 0
+        for doc_path in {p for p in doc_paths if p}:
+            try:
+                raw_file = self._safe_content_path(content_dir, doc_path)
+                if raw_file:
+                    total += os.path.getsize(raw_file)
+            except OSError:
+                pass
+        return total
+
     @contextmanager
     def _index_write_lock(self, owner, name):
         """Exclusive cross-process lock guarding writes to one repo's index.

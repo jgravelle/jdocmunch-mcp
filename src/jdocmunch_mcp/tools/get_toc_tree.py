@@ -73,7 +73,8 @@ def get_toc_tree(
             "sections": roots,
         })
 
-    raw_bytes = sum(len(s.get("content", "").encode("utf-8")) for s in index.sections)
+    # jdoc#138: see get_toc. Scoped to the documents in the tree.
+    raw_bytes = store.raw_doc_bytes(owner, name, docs.keys())
     response_str = str(tree_docs)
     response_bytes = len(response_str.encode("utf-8"))
     tokens_saved = estimate_savings(raw_bytes, response_bytes)

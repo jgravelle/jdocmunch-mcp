@@ -375,11 +375,9 @@ def search_sections(
 
     # Calculate token savings: matched docs full bytes vs summary-only response
     matched_doc_paths = {r.get("doc_path") for r in results}
-    raw_bytes = sum(
-        len(s.get("content", "").encode("utf-8"))
-        for s in index.sections
-        if s.get("doc_path") in matched_doc_paths
-    )
+    # jdoc#138: from the cached files, not from section ``content``, which
+    # is empty for every byte-addressed section after a reload.
+    raw_bytes = store.raw_doc_bytes(owner, name, matched_doc_paths)
     # jdoc#101: response_bytes is measured on the SERVED rows, so it is
     # computed after projection/snippets at the bottom of this function —
     # not here, where the rows still carry fields the caller may never see.

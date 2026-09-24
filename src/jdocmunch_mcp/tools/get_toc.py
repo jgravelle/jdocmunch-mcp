@@ -53,7 +53,11 @@ def get_toc(
         })
 
     # Estimate token savings vs returning full content
-    raw_bytes = sum(len(s.get("content", "").encode("utf-8")) for s in index.sections)
+    # jdoc#138: the files this TOC covers, read from the cache. Section
+    # ``content`` is empty after a reload, which made this 0. Scoped to the
+    # path_glob set, not the whole index: those are the files the caller
+    # would otherwise have read.
+    raw_bytes = store.raw_doc_bytes(owner, name, (s.get("doc_path") for s in sections))
     response_bytes = sum(len(str(t).encode("utf-8")) for t in toc)
     tokens_saved = estimate_savings(raw_bytes, response_bytes)
     total = record_savings(tokens_saved, storage_path)
