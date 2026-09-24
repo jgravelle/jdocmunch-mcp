@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Fixed - an incremental embed pass rewrote the whole embeddings sidecar to add a few rows (#141)
+
+Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140:
+5.6 s per incremental run to rewrite a 279 MB sidecar.
+
+Without `prune`, `embed_sections` started from every cached row, added this
+pass's vectors, and rewrote the file atomically. With a matching identity
+that is the same set of keys an append produces. It now appends through a new
+`cache.append_rows`, which takes the keys the pass already loaded instead of
+rescanning the file.
+
+⚠⚠ **The full rewrite still runs wherever it does real work.** An identity
+rotation (#109) uses it to retract old-width vectors. `prune=True` (#107)
+uses it to drop rows. A missing sidecar, or one with a matching header but no
+readable rows, gets its header written and is repaired. All the existing
+#107/#109 tests pass unmodified.
+
+⚠ **The file's size is unchanged by this.** The rewrite already kept the
+rows of superseded hashes, since only `prune` drops anything. #141's own text
+said an append would start accumulating them; that was wrong, and no
+compaction is added.
+
+Two cases needed care. A key can be present and still miss, because an empty
+stored vector is falsy. So a row is appended whenever the stored vector
+differs, and `load` keeps the last row for a key. A torn trailing line from
+a crash mid-append is terminated first, so the next row isn't glued onto the
+fragment and dropped.
+
+Measured with a 289 MB sidecar (36,925 rows of 384 dimensions, a
+fake provider, Windows, median of 3): a 3-section pass took 12.99 s before
+and 5.00 s after, with 36,927 rows either way. Most of what remains is parsing
+the sidecar, which is #140.
+
+`tests/test_jdoc_141_sidecar_append.py` (7). Each guard was proven by removing
+it: the append path, the `prune` exclusion, the newline guard, and the
+changed-vector comparison each turn one test red. The identity check is not
+proven, and can't be today: `load` already returns nothing on a mismatch, so
+the check never decides anything. It is kept as a backstop and the code says
+so.
+
 ### Fixed - the section loader resolved the content root once per section (#143)
 
 Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140,
