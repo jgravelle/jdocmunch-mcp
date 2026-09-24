@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Fixed - the section loader resolved the content root once per section (#143)
+
+Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140,
+with a profile: 179,486 `realpath` calls and 4.8 s on one incremental run over
+36,925 sections.
+
+`DocStore._safe_content_path` called `content_dir.resolve()` on every call, and
+the loader an index uses to read section bodies called it once per section with
+the same directory. The loader now resolves the root once, when the index is
+loaded, and passes it in through a new optional `resolved_root` argument.
+`raw_doc_bytes` does the same. The loader's `exists()` probe is gone too:
+`open()` already raises for a missing file, and the handler returns `""`.
+
+⚠ **Only the ROOT's resolve moved.** Each candidate path is still resolved on
+every call, because that is the escape guard. A symlink inside the content
+directory can point outside it, and only resolving the candidate catches that.
+If a root moves after the index loads, reads refuse. They can't escape.
+
+Measured on this repository's own index (14,225 section loads, Windows,
+median of 5): 4.32 s before, 2.46 to 2.63 s after, and `realpath` calls per
+pass halved from 28,450 to 14,225. The reporter's macOS profile showed about
+2.5 `realpath` calls per load against 2 here, so their saving may differ.
+
+`tests/test_jdoc_143_resolve_root_once.py` (6). The resolve-count test fails
+without the fix. The escaping-symlink test was proven by replacing the
+candidate's `resolve()` with `abspath`, and it fails.
+
 ### Fixed - four tools reported zero tokens saved on any index read back from disk (#138)
 
 Reported by [@sdjrdriver](https://github.com/sdjrdriver), who named all four

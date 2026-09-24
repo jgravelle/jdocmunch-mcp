@@ -992,9 +992,19 @@ class DocStore:
         except (OSError, ValueError, TypeError):
             pass
 
-    def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
+    def _safe_content_path(
+        self, content_dir: Path, relative_path: str, resolved_root: Optional[Path] = None,
+    ) -> Optional[Path]:
+        """Resolve ``relative_path`` under ``content_dir``, or None if it escapes.
+
+        jdoc#143: a caller that loops over sections passes ``resolved_root``
+        (``content_dir.resolve()``, computed once) so the root is not resolved
+        again on every call. ⚠ The CANDIDATE is still resolved every time: that
+        is the escape guard, since a symlink inside the content dir can point
+        outside it and only resolving the candidate catches it.
+        """
         try:
-            base = content_dir.resolve()
+            base = resolved_root if resolved_root is not None else content_dir.resolve()
             candidate = (content_dir / relative_path).resolve()
             if os.path.commonpath([str(base), str(candidate)]) != str(base):
                 return None
@@ -1017,10 +1027,14 @@ class DocStore:
         understate the saving.
         """
         content_dir = self._content_dir(owner, name)
+        try:
+            resolved_root = content_dir.resolve()
+        except (OSError, ValueError):
+            return 0
         total = 0
         for doc_path in {p for p in doc_paths if p}:
             try:
-                raw_file = self._safe_content_path(content_dir, doc_path)
+                raw_file = self._safe_content_path(content_dir, doc_path, resolved_root)
                 if raw_file:
                     total += os.path.getsize(raw_file)
             except OSError:
@@ -1385,13 +1399,22 @@ class DocStore:
         # Inject lazy content loader so search can score on body text (B1).
         owner_str, name_str = owner, name
         content_dir = self._content_dir(owner_str, name_str)
+        # jdoc#143: resolved once per loaded index, not once per section.
+        # A root that moves after this can only make reads REFUSE (the
+        # candidate no longer sits under it), never escape.
+        try:
+            resolved_root = content_dir.resolve()
+        except (OSError, ValueError):
+            resolved_root = None
 
         def _loader(doc_path: str, byte_start: int, byte_end: int) -> str:
             if not doc_path or byte_end <= byte_start:
                 return ""
-            file_path = self._safe_content_path(content_dir, doc_path)
-            if not file_path or not file_path.exists():
+            file_path = self._safe_content_path(content_dir, doc_path, resolved_root)
+            if not file_path:
                 return ""
+            # No exists() probe: open() below raises OSError for a missing
+            # file, which the handler already turns into "".
             try:
                 with open(file_path, "rb") as fh:
                     fh.seek(byte_start)
