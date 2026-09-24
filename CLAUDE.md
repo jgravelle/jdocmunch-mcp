@@ -463,7 +463,7 @@ sections 15,967 — ratio exactly **1.0000**. ⚠⚠ **It is clean for a REASON,
 by luck, and the reason is load-bearing**: if section bodies ever become
 descendant-inclusive, every one of those sums silently starts double-counting.
 ⚠⚠ **Those sums were ALSO zero the whole time, and this audit could not see
-it** (#138, @sdjrdriver, fixed on `fix/138-raw-bytes-baseline`, 2026-09-24).
+it** (#138, @sdjrdriver, fixed 2026-09-24, unreleased).
 `Section.to_dict` drops `content` for byte-addressed sections, so on any index
 READ BACK FROM DISK the sum is 0 and `tokens_saved` floors to 0. The 1.0000
 ratio was measured on freshly parsed sections, which still carry content.
