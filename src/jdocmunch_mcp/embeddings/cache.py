@@ -32,6 +32,55 @@ from typing import Iterable, Optional
 _CACHE_FILE = "{name}.embeddings.jsonl"
 _CACHE_LOCK = threading.Lock()
 
+# jdoc#140: the keys on disk, remembered per sidecar so one run does not parse
+# a large file several times. An incremental index read it in full three
+# times: `load` in the embed pass, the rescan in `append_entries`, and
+# `stored_hashes` for the coverage report.
+#
+# ⚠⚠ An entry is trusted only while the file's (size, mtime_ns) still match
+# what was recorded, so a reader still sees what is ON DISK. If anything else
+# rewrites or appends to the file, the stat moves and the reader parses again.
+# That matters most for `stored_hashes`, whose caller (#107) exists to report
+# what actually reached disk. Our own writers update the entry after writing,
+# so their writes do not force a re-read.
+_KEY_MEMO: dict = {}   # str(path) -> (stat_sig, header_present, frozenset(keys))
+_KEY_MEMO_MAX = 8
+
+
+def _stat_sig(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _memo_get(path: Path):
+    """Return ``(header_present, keys)`` if the memo still describes the file."""
+    entry = _KEY_MEMO.get(str(path))
+    if entry is None:
+        return None
+    sig, header_present, keys = entry
+    if sig is None or sig != _stat_sig(path):
+        _KEY_MEMO.pop(str(path), None)
+        return None
+    return header_present, keys
+
+
+def _memo_put(path: Path, sig, header_present: bool, keys) -> None:
+    """Record keys read or written under ``sig``, but only if the file still
+    has that signature, i.e. nothing changed it while we were reading."""
+    if sig is None or sig != _stat_sig(path):
+        _KEY_MEMO.pop(str(path), None)
+        return
+    if len(_KEY_MEMO) >= _KEY_MEMO_MAX and str(path) not in _KEY_MEMO:
+        _KEY_MEMO.pop(next(iter(_KEY_MEMO)))
+    _KEY_MEMO[str(path)] = (sig, header_present, frozenset(keys))
+
+
+def _memo_drop(path: Path) -> None:
+    _KEY_MEMO.pop(str(path), None)
+
 
 def _cache_path(base_path: Optional[str], owner: str, name: str) -> Path:
     root = Path(base_path) if base_path else Path.home() / ".doc-index"
@@ -92,6 +141,7 @@ def load(
     if not path.exists():
         return {}
 
+    sig = _stat_sig(path)
     out: dict[str, list] = {}
     header_ok = False
     try:
@@ -126,6 +176,9 @@ def load(
                     out[h] = vec
     except OSError:
         return {}
+    if header_ok:
+        with _CACHE_LOCK:
+            _memo_put(path, sig, True, out.keys())
     return out
 
 
@@ -209,13 +262,16 @@ def write(
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with _CACHE_LOCK:
+        written: set = set()
         with tmp.open("w", encoding="utf-8") as fh:
             fh.write(json.dumps(_identity(provider, model, dim, embed_chars)) + "\n")
             for h, vec in entries:
                 if not isinstance(h, str) or not isinstance(vec, list):
                     continue
                 fh.write(json.dumps({"hash": h, "vector": vec}) + "\n")
+                written.add(h)
         tmp.replace(path)
+        _memo_put(path, _stat_sig(path), True, written)
 
 
 def stored_hashes(base_path: Optional[str], owner: str, name: str) -> set:
@@ -236,6 +292,13 @@ def stored_hashes(base_path: Optional[str], owner: str, name: str) -> set:
         return set()
     if not path.exists():
         return set()
+    with _CACHE_LOCK:
+        memo = _memo_get(path)
+    if memo is not None:
+        return {h.rsplit("#", 1)[0] for h in memo[1]}
+    sig = _stat_sig(path)
+    full: set = set()
+    header_present = False
     out: set = set()
     try:
         with path.open("r", encoding="utf-8") as fh:
@@ -248,12 +311,16 @@ def stored_hashes(base_path: Optional[str], owner: str, name: str) -> set:
                 except Exception:
                     continue
                 if entry.get("_header") is True:
+                    header_present = True
                     continue
                 h = entry.get("hash")
                 if isinstance(h, str) and h:
+                    full.add(h)
                     out.add(h.rsplit("#", 1)[0])
     except OSError:
         return set()
+    with _CACHE_LOCK:
+        _memo_put(path, sig, header_present, full)
     return out
 
 
@@ -284,7 +351,10 @@ def append_entries(
     with _CACHE_LOCK:
         existing: set = set()
         header_present = False
-        if path.exists():
+        memo = _memo_get(path) if path.exists() else None
+        if memo is not None:
+            header_present, existing = memo[0], set(memo[1])
+        elif path.exists():
             try:
                 with path.open("r", encoding="utf-8") as fh:
                     for raw in fh:
@@ -322,7 +392,11 @@ def append_entries(
                 for h, vec in pending:
                     fh.write(json.dumps({"hash": h, "vector": vec}) + "\n")
         except OSError:
+            _memo_drop(path)
             return 0
+        # `existing` is complete on every path that reaches here: from the
+        # memo, from the full scan above, or empty because there was no file.
+        _memo_put(path, _stat_sig(path), True, existing | {h for h, _ in pending})
         return len(pending)
 
 
@@ -356,6 +430,7 @@ def append_rows(
         return 0
     path = _cache_path(base_path, owner, name)
     with _CACHE_LOCK:
+        memo = _memo_get(path)
         with path.open("ab+") as fh:
             fh.seek(0, 2)
             if fh.tell() > 0:
@@ -364,6 +439,10 @@ def append_rows(
                     fh.write(b"\n")
             for h, vec in pending:
                 fh.write((json.dumps({"hash": h, "vector": vec}) + "\n").encode("utf-8"))
+        if memo is not None:
+            _memo_put(path, _stat_sig(path), memo[0], set(memo[1]) | {h for h, _ in pending})
+        else:
+            _memo_drop(path)
     return len(pending)
 
 
