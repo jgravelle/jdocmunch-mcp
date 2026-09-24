@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Fixed - an incremental index read every section body twice (#142, part 1)
+
+Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140:
+73,814 `_loader` calls for 36,925 sections on one incremental run.
+
+The two passes were the BM25 stats recompute inside `incremental_save`, and
+the rebuild of the four derived sidecars in `index_local` (#117). The profile
+couldn't show the second, because both go through the same loader.
+`incremental_save` takes a new optional `content_sink` dict, and the stats
+pass records each kept body it reads there. The sidecar rebuild checks it
+after the in-memory text of this run's changed files and before reading from
+disk. Only KEPT documents' reads are recorded, because those are the only
+old reads still valid after the save. `index_file` and `index_repo` pass
+nothing and behave as before.
+
+Measured on a synthetic corpus (3,000 files, 35,991 sections, one changed
+file, Windows, median of 3): 44.03 s before, 37.67 s after. Peak traced
+memory was 572 MB before and 575 MB after. The rebuild already held every
+body in memory, so recording them earlier doesn't add a second copy.
+
+⚠ **Part 2 of #142 isn't in this entry.** Updating the BM25 stats by delta
+instead of recomputing them can't be exact from the stored stats. `df` is
+capped at the top 5,000 terms, and on this repository the cut falls inside
+the count-1 tail, 1,848 terms tied, where which terms survive depends on
+section order. So today a full build and an incremental build can already
+keep different rare terms. An exact delta needs the uncapped counts stored
+and a total tie-break at the cap, which changes ranking at the margin. That
+is a separate decision, with replay numbers, before any change.
+
+`tests/test_jdoc_142_shared_content_read.py` (3). Without the reuse, the
+read-count test sees 354 reads where the limit is 177. The equivalence test
+compares all four sidecars against a fresh full build, and turns red when
+the sink returns empty bodies.
+
 ### Fixed - with `DOC_INDEX_PATH` set, the CLI wrote sidecars under `~/.doc-index` (#146)
 
 Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO), who found it
