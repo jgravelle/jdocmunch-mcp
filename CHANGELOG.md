@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Fixed - an incremental index parsed the embeddings sidecar three times (#140)
+
+Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO), with a profile
+of a 3,771-file corpus and a 279 MB sidecar. #141 and #143 were split out of
+the same report.
+
+Three full reads of the same file happened per incremental run: `load` in the
+embed pass, the rescan in `append_entries` (reached through
+`_ensure_sidecar_from_sections` after the save), and `stored_hashes` for the
+#107 coverage report. The keys on disk are now remembered per sidecar, and the
+later two reuse them. After #141 the embed pass appends, and the memo follows
+our own writes, so an incremental run now parses the file once.
+
+⚠⚠ **The memo is trusted only while the file's size AND `mtime_ns` still
+match what was recorded.** The reporter's own suggestion was to pass the
+parsed view along, which would have made the coverage report describe the
+file as it was at the start of the run. #107 exists because a total vector
+loss once exited 0 unnoticed, so that report must describe the disk. With the
+stat check, anything else that appends, rewrites or deletes the file forces a
+real read. Size alone isn't enough: a same-size rewrite is caught only by the
+mtime, and a test covers that case.
+
+Measured on a 289 MB sidecar (36,925 rows of 384 dimensions, Windows, median
+of 3): `append_entries` 3.52 s → 0.00 s, `stored_hashes` 3.61 s → 0.01 s,
+identical keys. The memo adds 3.9 ms to `load`. `load` itself stays, and it is
+now the one full parse.
+
+`tests/test_jdoc_140_sidecar_parsed_once.py` (8), including an end-to-end
+incremental `index_local` that asserts `load` is the only full read. Proven by
+mutation: a memo that is never used turns 4 tests red, a memo trusted without
+the stat check turns 2 red, and a size-only check turns the same-size rewrite
+test red.
+
 ### Fixed - an incremental embed pass rewrote the whole embeddings sidecar to add a few rows (#141)
 
 Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140:
