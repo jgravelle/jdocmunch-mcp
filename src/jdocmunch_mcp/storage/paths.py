@@ -1,9 +1,9 @@
 """Where jdocmunch keeps its files (jdoc#146).
 
 Every module that stores something under the index root resolves that root
-here. Until #146 eleven of them fell back to ``~/.doc-index`` whenever they
-were handed ``base_path=None``, while ``DocStore`` honoured ``DOC_INDEX_PATH``
-(#37). The MCP server passes the variable explicitly, so it never noticed; the
+here. Until #146, eleven fallbacks in ten modules pointed at ``~/.doc-index``
+whenever they were handed ``base_path=None``, while ``DocStore`` honoured
+``DOC_INDEX_PATH`` (#37). The MCP server passes the variable explicitly, so it never noticed; the
 CLI passes nothing, so with ``DOC_INDEX_PATH`` set the index went to one root
 and its sidecars to another, overwriting the live sidecars of any index with
 the same name under the home directory.
