@@ -462,6 +462,15 @@ nesting. Measured on this repo's own README: file 15,967 bytes, sum of 19
 sections 15,967 — ratio exactly **1.0000**. ⚠⚠ **It is clean for a REASON, not
 by luck, and the reason is load-bearing**: if section bodies ever become
 descendant-inclusive, every one of those sums silently starts double-counting.
+⚠⚠ **Those sums were ALSO zero the whole time, and this audit could not see
+it** (#138, @sdjrdriver, fixed on `fix/138-raw-bytes-baseline`, 2026-09-24).
+`Section.to_dict` drops `content` for byte-addressed sections, so on any index
+READ BACK FROM DISK the sum is 0 and `tokens_saved` floors to 0. The 1.0000
+ratio was measured on freshly parsed sections, which still carry content.
+**A property checked on an in-memory object says nothing about the reloaded
+one.** Those tools now use `DocStore.raw_doc_bytes` (cached file sizes, distinct
+paths). The partition property above is now the reason that substitution is
+exact, so it is still load-bearing.
 
 - **A competitor's fix list is a free defect probe.** A rival shipped
   `fix(gini): measure a file's lines as its own span, not the sum of every node`
