@@ -62,7 +62,8 @@ _MIN_SIZE_BYTES = int(os.environ.get("JDOCMUNCH_HOOK_MIN_SIZE", "2048"))
 def _hook_state_dir() -> Path:
     """Directory holding the reindex throttle state (debounce stamps + slot
     locks + optional log). Co-located with the doc-index storage root."""
-    base = os.environ.get("DOC_INDEX_PATH") or str(Path.home() / ".doc-index")
+    from ..storage.paths import default_root  # jdoc#146
+    base = str(default_root())
     d = Path(base) / "_hooks"
     d.mkdir(parents=True, exist_ok=True)
     return d

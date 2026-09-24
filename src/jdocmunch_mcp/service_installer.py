@@ -45,7 +45,8 @@ def _launchd_plist_path() -> Path:
 
 
 def _log_dir() -> Path:
-    base = Path(os.environ.get("DOC_INDEX_PATH") or (Path.home() / ".doc-index"))
+    from .storage.paths import default_root  # jdoc#146
+    base = default_root()
     return base / "logs"
 
 

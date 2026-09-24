@@ -83,12 +83,43 @@ def _memo_drop(path: Path) -> None:
 
 
 def _cache_path(base_path: Optional[str], owner: str, name: str) -> Path:
-    root = Path(base_path) if base_path else Path.home() / ".doc-index"
+    from ..storage.paths import resolve_root  # jdoc#146
+    root = resolve_root(base_path)
     safe_owner = owner.strip().replace("/", "_").replace("\\", "_")
     safe_name = name.strip().replace("/", "_").replace("\\", "_")
     if not safe_owner or not safe_name:
         raise ValueError(f"Invalid cache target: owner={owner!r} name={name!r}")
     return root / safe_owner / _CACHE_FILE.format(name=safe_name)
+
+
+def _legacy_read_path(base_path: Optional[str], owner: str, name: str, path: Path) -> Path:
+    """Where to READ a sidecar that is not yet at ``path`` (jdoc#146).
+
+    Before #146 a CLI run with ``DOC_INDEX_PATH`` set wrote this sidecar under
+    the HOME root while the index went to ``DOC_INDEX_PATH``. The path is now
+    correct, and on the first pass after upgrading the sidecar is absent there.
+    ⚠⚠ Reading that as "no vectors" would re-embed the whole corpus. So
+    ``load`` falls back to the home copy for reading only. The embed pass then
+    finds its cache hits, and ``identity`` (which does NOT fall back) reports
+    no sidecar at the new path, so the pass takes the full rewrite and writes
+    every vector next to the index in one pass, header first. The home copy is
+    never modified, since it may belong to a separate home-root index with the
+    same name.
+
+    ⚠⚠ Giving ``identity`` the fallback too would let #141's append path match
+    the home header and append rows to a new file that has no header.
+
+    Only for ``base_path=None`` with the variable set. An explicit
+    ``base_path`` (the MCP server's own calls, and every test) never reads
+    outside the root it named.
+    """
+    if base_path or path.exists():
+        return path
+    from ..storage.paths import default_root, home_root
+    if default_root() == home_root():
+        return path
+    legacy = _cache_path(str(home_root()), owner, name)
+    return legacy if legacy.exists() else path
 
 
 # jdoc#111: sidecars written before the char cap joined the identity have no
@@ -137,7 +168,7 @@ def load(
     entries load, merge with the new ones, and the sidecar accumulates BOTH
     derivations instead of replacing one with the other.
     """
-    path = _cache_path(base_path, owner, name)
+    path = _legacy_read_path(base_path, owner, name, _cache_path(base_path, owner, name))
     if not path.exists():
         return {}
 

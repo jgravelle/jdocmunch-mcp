@@ -876,8 +876,8 @@ class DocStore:
             # #37: honor DOC_INDEX_PATH for EVERY entry point (CLI + hooks), not
             # just the MCP dispatch path, so storage can't split-brain. An
             # explicit base_path still takes precedence.
-            env_path = os.environ.get("DOC_INDEX_PATH")
-            self.base_path = Path(env_path) if env_path else Path.home() / ".doc-index"
+            from .paths import default_root
+            self.base_path = default_root()
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def _safe_repo_component(self, value: str, field_name: str) -> str:
@@ -1435,7 +1435,12 @@ class DocStore:
             if co_located.exists():
                 index._embeddings_sidecar = str(co_located)
             else:
-                default_root = _emb_cache_path(None, owner_str, name_str)
+                # jdoc#146: the HOME root by name, not `_emb_cache_path(None)`,
+                # which now follows DOC_INDEX_PATH. Vectors a CLI run wrote
+                # under the home root before #146 are found here until the
+                # next embed pass rewrites them next to the monolith.
+                from .paths import home_root as _home_root
+                default_root = _emb_cache_path(str(_home_root()), owner_str, name_str)
                 index._embeddings_sidecar = str(
                     default_root if default_root.exists() else co_located
                 )
