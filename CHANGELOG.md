@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Fixed - with `DOC_INDEX_PATH` set, the CLI wrote sidecars under `~/.doc-index` (#146)
+
+Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO), who found it
+while benchmarking #144 and traced it to the exact call.
+
+The CLI's `index-local` calls `index_local` without `storage_path`. `DocStore`
+has honoured `DOC_INDEX_PATH` on its own since #37, so the index went where
+the variable pointed. The sidecar writers fell back to `~/.doc-index` on
+`base_path=None`. So with the variable set, the index went to one root and
+its embeddings, related-sections, terms and boilerplate files went to the
+home root. There they overwrote the live files of any index with the same
+name. The MCP server passes the variable explicitly, which is why it never
+showed there.
+
+⚠ **It was eleven fallbacks in ten modules, not four.** The saved weights, replay log, repo
+groups, savings counter, telemetry database, drift record and duplicates
+sidecar had the same fallback. Every root now resolves through
+`storage/paths.py`, which reads the variable at call time. A ratchet test
+fails if any other module builds its own `".doc-index"` path. It was checked
+against that exact shape, and a docstring mentioning the path doesn't trip it.
+
+⚠⚠ **The embeddings sidecar needed a migration, not just a path fix.**
+Anyone who ran the CLI this way before has their vectors under the home root.
+Once the path is correct, the first pass would find nothing at the new root
+and re-embed the whole corpus. So `cache.load` falls back to the home copy
+for reading, only when `base_path` is `None` and the variable is set. The
+pass gets its cache hits and writes every vector next to the index in one
+rewrite. The home copy is never modified, because it may belong to a separate
+home-root index with the same name. `cache.identity` deliberately does NOT
+fall back: if it did, #141's append path would match the home header and
+append rows to a new file with no header. A test covers that. `DocStore`'s
+existing read fallback now names the home root explicitly, so semantic search
+keeps finding those vectors until the next CLI pass moves them.
+
+For the other files there is nothing to migrate. The server already read
+them from `DOC_INDEX_PATH`, so a CLI run now writes where the server reads.
+One visible effect: for a CLI user with the variable set, the savings counter
+now accumulates in the same file the server uses, instead of a separate file
+under the home root.
+
+`tests/test_jdoc_146_doc_index_path_everywhere.py` (8). Real-home access is
+redirected into `tmp_path`. Proven by mutation: master's code fails 5; removing
+the read fallback fails the no-re-embed test; giving `identity` the fallback
+fails 2; pointing `DocStore` back at `_cache_path(None)` fails the server test.
+
 ### Fixed - an incremental index parsed the embeddings sidecar three times (#140)
 
 Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO), with a profile

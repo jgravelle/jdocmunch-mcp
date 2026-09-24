@@ -46,7 +46,8 @@ DEFAULT_WATCH_POLL_DELAY_MS = 1000
 
 
 def doc_storage_path_default() -> str:
-    return os.environ.get("DOC_INDEX_PATH") or str(Path.home() / ".doc-index")
+    from .storage.paths import default_root  # jdoc#146
+    return str(default_root())
 
 
 def _doc_extensions() -> set[str]:

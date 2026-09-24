@@ -29,7 +29,8 @@ _LOCK = threading.Lock()
 
 
 def _path(base_path: Optional[str] = None) -> Path:
-    root = Path(base_path) if base_path else Path.home() / ".doc-index"
+    from .paths import resolve_root  # jdoc#146
+    root = resolve_root(base_path)
     root.mkdir(parents=True, exist_ok=True)
     return root / _FILENAME
 

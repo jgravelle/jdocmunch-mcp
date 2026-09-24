@@ -102,7 +102,8 @@ isolated home / store / model cache, exit 0 in 119 s, `search_mode: hybrid`,
 torch not loaded. ⚠ Two pre-existing quirks seen there and NOT fixed here:
 stdin from `/dev/null` reads as a TTY on Windows (prompts EOF to "no"), and with
 `DOC_INDEX_PATH` set the embeddings sidecar is written to the store AND to
-`~/.doc-index`. ⚠ Follow-up, not shipped: fastembed's default model cache is
+`~/.doc-index` (the second one was FIXED as #146, 2026-09-24: every root now
+resolves through `storage/paths.py`). ⚠ Follow-up, not shipped: fastembed's default model cache is
 `<tempdir>/fastembed_cache`, which an OS cleanup can empty.
 
 ⚠ I lost uncommitted `init.py` edits by reverting a mutation check with

@@ -53,7 +53,8 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
 def _path(base_path: Optional[str], owner: str, name: str) -> Path:
-    root = Path(base_path) if base_path else Path.home() / ".doc-index"
+    from ..storage.paths import resolve_root  # jdoc#146
+    root = resolve_root(base_path)
     safe_owner = (owner or "").strip().replace("/", "_").replace("\\", "_") or "_"
     safe_name = (name or "").strip().replace("/", "_").replace("\\", "_") or "_"
     return root / safe_owner / _FILENAME.format(name=safe_name)
