@@ -149,6 +149,18 @@ models were superseded, so the published figure overstated avoided cost threefol
 It also listed only two of the four rates the server actually reports. Rates are
 input-token rates and are a valuation input, not a claim about your bill.
 
+⚠ **Before the release that fixed
+[#138](https://github.com/jgravelle/jdocmunch-mcp/issues/138), four tools
+reported `tokens_saved: 0` on nearly every call**: `search_sections`, `get_toc`,
+`get_toc_tree` and `get_document_outline`. Their baseline summed section
+content, which is not stored for most sections, so on any index loaded from disk
+it came to zero. They now read the cached file sizes. **This is a change of
+basis, and it raises the reported figures.** A `total_tokens_saved` or community
+aggregate that spans the fix mixes the two, so the jump at the upgrade is the
+corrected measurement starting, not a rise in usage. Earlier totals are not
+recomputed. The calls they missed were never recorded, so any recomputed figure
+would be a guess.
+
 Telemetry network failures are silent and never affect tool performance. The
 anonymous community counter is opt-out via `JDOCMUNCH_SHARE_SAVINGS=0`; see
 [SECURITY.md](SECURITY.md).

@@ -1,5 +1,58 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed - four tools reported zero tokens saved on any index read back from disk (#138)
+
+Reported by [@sdjrdriver](https://github.com/sdjrdriver), who named all four
+sites and the cause correctly.
+
+`search_sections`, `get_toc`, `get_toc_tree` and `get_document_outline`
+computed the bytes a caller would otherwise have read by summing each section's
+`content`. `Section.to_dict` does not persist `content` for a section that has
+byte offsets, which is nearly all of them, so once an index was loaded from disk
+the sum was 0. `estimate_savings` floors at 0, so `tokens_saved` was 0 on every
+call. Only structured OpenAPI sections (`byte_end == 0`) keep their content, so
+an OpenAPI index had a partial baseline. That number was wrong and nothing
+showed it. `get_section`, `get_sections` and `get_section_context` were already
+correct because they read the cached file size.
+
+The four tools now use the same source, through a new
+`DocStore.raw_doc_bytes`: the summed sizes of the distinct cached files the
+response covers. This reconstructs the quantity the old code meant to compute
+because sections partition a document rather than nesting. The README measured
+15,967 bytes on disk, and its 19 section bodies also sum to 15,967. A glob on
+`get_toc` or `get_toc_tree` now narrows the baseline to the matched files.
+Before, it counted the whole index.
+
+Measured on this repository (315 documents, 14,563 sections, 33 of them carrying
+content after reload). Every call was 0 before the fix:
+
+| call | `tokens_saved` after |
+|---|---:|
+| `search_sections`, three queries | 21,203 / 69,351 / 130,341 |
+| `get_toc(path_glob="docs/*")` | 35,587 |
+| `get_document_outline`, README.md / CHANGELOG.md | 3,262 / 31,006 |
+| `get_toc`, `get_toc_tree`, no glob | 0 |
+
+⚠ **The last row is correct and stays 0.** A TOC of 14,563 sections is larger
+than the 1.44 MB of documents it describes, so it saves nothing, and the floor
+reports that.
+
+⚠⚠ **This raises the savings this package reports about itself.** The
+anonymous counter is on unless `JDOCMUNCH_SHARE_SAVINGS=0`, and these are four
+of the most-called tools. So any total that spans this release mixes two bases,
+and the step at the upgrade is the corrected measurement starting, not growth.
+Earlier totals are not recomputed: the calls were never recorded with a
+baseline, and a rebuilt history would be a guess. `TOKEN_SAVINGS.md` says so
+beside the counter it describes.
+
+`tests/test_jdoc_138_raw_bytes_baseline.py` (8) reloads the index from disk and
+asserts no section carries content before any tool is called. Without that
+check, a future change that round-trips content would make the old code pass
+too. With the four tool edits reverted, 6 of 8 fail. The other two test the
+helper itself.
+
 ## [1.144.0] - 2026-09-21 - a repository's documents had no time, and the commit date was already in hand
 
 ### Added - document recency: `index_repo` change set, and `mtime` on `list_docs`

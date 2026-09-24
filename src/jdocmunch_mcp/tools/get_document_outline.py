@@ -50,7 +50,9 @@ def get_document_outline(
             "byte_end": sec.get("byte_end"),
         })
 
-    raw_bytes = sum(len(s.get("content", "").encode("utf-8")) for s in doc_sections)
+    # jdoc#138: the document's cached file, not the sum of section
+    # ``content``, which is empty after a reload.
+    raw_bytes = store.raw_doc_bytes(owner, name, (s.get("doc_path") for s in doc_sections))
     response_bytes = sum(len(str(o).encode("utf-8")) for o in outline)
     tokens_saved = estimate_savings(raw_bytes, response_bytes)
     total = record_savings(tokens_saved, storage_path)
