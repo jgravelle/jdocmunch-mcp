@@ -1576,12 +1576,48 @@ class DocStore:
         kept_loader = getattr(index, "_content_loader", None)
         new_raw_map = dict(raw_files)
 
+        # jdoc#142: the per-section loader opens the file once per SECTION
+        # (35,989 opens and 25.6 s of a 48.5 s profile on a 36k-section
+        # corpus). Here each kept file is read whole once and sliced. A kept
+        # document's sections are contiguous in `index.sections`, so holding
+        # ONE file bounds memory by the largest document.
+        # ⚠ Scoped to this pass on purpose: kept files cannot change until
+        # the writes below. A cache on the long-lived `_content_loader` could
+        # serve old bytes after a save.
+        # ⚠ The slice must equal what `_loader` returns: same path guard, a
+        # BYTE slice, and utf-8 with errors="replace".
+        content_dir = self._content_dir(owner, name)
+        try:
+            resolved_root = content_dir.resolve()
+        except (OSError, ValueError):
+            resolved_root = None
+        _file_memo: dict = {}
+
+        def _kept_read(doc_path: str, byte_start: int, byte_end: int) -> str:
+            if not doc_path or byte_end <= byte_start:
+                return ""
+            if doc_path not in _file_memo:
+                _file_memo.clear()
+                data = None
+                file_path = self._safe_content_path(content_dir, doc_path, resolved_root)
+                if file_path:
+                    try:
+                        with open(file_path, "rb") as fh:
+                            data = fh.read()
+                    except OSError:
+                        data = None
+                _file_memo[doc_path] = data
+            data = _file_memo[doc_path]
+            if data is None:
+                return ""
+            return data[byte_start:byte_end].decode("utf-8", errors="replace")
+
         def _stats_loader(doc_path: str, byte_start: int, byte_end: int) -> str:
             buf = new_raw_map.get(doc_path)
             if buf is not None and byte_end > byte_start:
                 return buf[byte_start:byte_end]
             if kept_loader:
-                text = kept_loader(doc_path, byte_start, byte_end) or ""
+                text = _kept_read(doc_path, byte_start, byte_end)
                 if content_sink is not None:
                     content_sink[(doc_path, byte_start, byte_end)] = text
                 return text
