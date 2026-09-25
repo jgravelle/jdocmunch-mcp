@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed - `related.json` was written pretty-printed (#151)
+
+Found while profiling #142. `related_persist.write` used `json.dumps(indent=2)`
+for a file that every reader parses with `json.loads`. The related-sections
+file is rewritten on every index, full and incremental (#117). It's now
+written with compact separators. On a synthetic 36,000-section graph: 2.37 s
+→ 0.33 s to write, 76.9 MB → 41.8 MB on disk, and the same 0.42 s to parse.
+The content and schema are unchanged, and a file written by an earlier
+version still loads.
+
+The boilerplate, duplicates and terms sidecars are also indented and were
+left alone: they're small, and there was no measured cost to claim.
+`tuning.jsonc` and `_groups.jsonc` stay indented because people edit them.
+
+`tests/test_jdoc_151_compact_related_json.py` (3). The format test fails on
+the old code. The round-trip and old-file tests pin behaviour that must hold
+either way.
+
 ### Fixed - an incremental index read every section body twice (#142, part 1)
 
 Reported by [@LuigiNicaPRO](https://github.com/LuigiNicaPRO) as part of #140:
