@@ -104,3 +104,48 @@ def test_sink_is_optional_for_other_callers(corpus):
     from jdocmunch_mcp.storage.doc_store import DocStore
     param = inspect.signature(DocStore.incremental_save).parameters["content_sink"]
     assert param.default is None
+
+
+# --- part 2: each kept file opened once --------------------------------------
+
+def test_stats_pass_opens_each_kept_file_once(corpus, monkeypatch):
+    src, store = corpus
+    _index(src, store)
+    (src / "d3.md").write_text("# D3\n\n## Alpha\n\nchanged\n", encoding="utf-8")
+
+    from jdocmunch_mcp.storage import doc_store as _ds
+    _ds._INDEX_CACHE.clear()
+    reads = _count_body_reads(monkeypatch, store / "local" / "c142")
+    _index(src, store)
+    monkeypatch.undo()
+
+    assert len(reads) == 59, f"{len(reads)} distinct files read"
+    assert max(reads.values()) == 1, f"a kept file was opened {max(reads.values())} times"
+
+
+def test_stats_equal_the_per_section_loader_on_multibyte_text(tmp_path, monkeypatch):
+    """The whole-file read slices BYTES; a character slice would drift after
+    the first multibyte character and still produce plausible tokens."""
+    monkeypatch.setenv("JDOCMUNCH_SHARE_SAVINGS", "0")
+    from jdocmunch_mcp.retrieval.bm25 import compute_corpus_stats
+    from jdocmunch_mcp.storage import doc_store as _ds
+
+    src = tmp_path / "docs"
+    src.mkdir()
+    for i in range(40):
+        (src / f"d{i}.md").write_text(
+            f"# Café {i} ✓\n\n## Überblick\n\n日本語のテキスト {i} naïve résumé\n\n"
+            f"## Zweiter Teil\n\nstraße ümlaut widget{i} ✓✓ fin\n",
+            encoding="utf-8",
+        )
+    store = tmp_path / "store"
+    _index(src, store)
+    (src / "d5.md").write_text("# Café 5\n\n## Überblick\n\ngeändert ✓\n", encoding="utf-8")
+    r = _index(src, store)
+    assert r.get("changed") == 1
+
+    _ds._INDEX_CACHE.clear()
+    s = _ds.DocStore(base_path=str(store))
+    index = s.load_index("local", "c142")
+    reference = compute_corpus_stats(index.sections, content_loader=index._content_loader)
+    assert index.bm25_stats == reference
