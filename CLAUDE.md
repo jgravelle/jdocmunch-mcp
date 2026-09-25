@@ -62,10 +62,14 @@ one** (#138). `Section.to_dict` drops `content`, so the old byte-mass audit
 The fix raises self-reported telemetry, and it shipped with the basis change
 disclosed in CHANGELOG and TOKEN_SAVINGS.md.
 
-⚠ **Open, not shipped:** #152 (`related_persist.lookup` parses the whole
-`related.json`, 1.99 s and 220 MB resident at 36k sections, so a memo is the
-wrong fix; one-section-per-line with offsets is the candidate, pending a
-ruling). And the related graph's semantic half measured **86 s** at 36k
+⚠ **#152 CLOSED not-planned (jjg, 2026-09-25), reopen invited.**
+`related_persist.lookup` parses the whole `related.json`: 1.99 s, and 220 MB
+resident if memoized, so a memo is the wrong fix. One-section-per-line with
+offsets is the design if it's ever needed. Closed because only
+`get_related_sections` calls it and there's no record of it being called: 0 of
+28 jdocmunch calls across 373 local transcripts, and no per-tool data from
+users exists, since the counter sends token totals only. ⚠ **Don't reopen on
+this evidence. Reopen on a user's latency report.** And the related graph's semantic half measured **86 s** at 36k
 sections on this box with random 16-dim vectors. That's unverified on real
 vectors and on the reporter's machine, so it is NOT a claim until measured.
 
