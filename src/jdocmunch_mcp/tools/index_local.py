@@ -2600,10 +2600,15 @@ def index_local(
                     owner=owner, name=repo_name, storage_path=storage_path,
                 )
 
+            # jdoc#142: the BM25 stats pass inside incremental_save reads
+            # every kept section body; the sidecar rebuild below needs every
+            # body again. Record them once and reuse.
+            content_sink: dict = {}
             updated = store.incremental_save(
                 owner=owner, name=repo_name,
                 changed_files=changed, new_files=new, deleted_files=deleted,
                 new_sections=new_sections, raw_files=raw_subset, doc_types=doc_types,
+                content_sink=content_sink,
                 # jdoc#136: the walk already read every mtime for `changes`;
                 # persisting the touched ones is what makes list_docs work.
                 file_mtimes=_iso_mtimes(mtimes_by_relpath, raw_subset),
@@ -2636,6 +2641,12 @@ def index_local(
                         end = int(sec.get("byte_end", 0))
                         if buf is not None and end > start:
                             return buf[start:end]
+                        # ⚠ After raw_subset: a file touched this run is
+                        # rewritten, so only KEPT documents' old reads are
+                        # still valid, and those are all the sink holds.
+                        seen = content_sink.get((sec.get("doc_path", ""), start, end))
+                        if seen is not None:
+                            return seen
                         if _loader is None:
                             return ""
                         try:

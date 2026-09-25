@@ -1502,11 +1502,18 @@ class DocStore:
         corpus_identity_version=_UNSET,
         reconciliation_state=_UNSET,
         coverage=_UNSET,
+        content_sink: Optional[dict] = None,
     ) -> Optional["DocIndex"]:
         """Incrementally update an existing index.
 
         Removes sections for deleted/changed files, adds new sections,
         updates raw content files, and saves atomically.
+
+        ``content_sink`` (jdoc#142): when a dict is passed, every kept
+        section body the BM25 stats pass reads from disk is recorded in it,
+        keyed ``(doc_path, byte_start, byte_end)``. ``index_local``'s sidecar
+        rebuild reads every body again, and uses the sink instead of a second
+        full pass over the content files.
         """
         index = self.load_index(owner, name)
         if not index:
@@ -1574,7 +1581,10 @@ class DocStore:
             if buf is not None and byte_end > byte_start:
                 return buf[byte_start:byte_end]
             if kept_loader:
-                return kept_loader(doc_path, byte_start, byte_end) or ""
+                text = kept_loader(doc_path, byte_start, byte_end) or ""
+                if content_sink is not None:
+                    content_sink[(doc_path, byte_start, byte_end)] = text
+                return text
             return ""
 
         # Inline content for the new tail so compute_corpus_stats doesn't
