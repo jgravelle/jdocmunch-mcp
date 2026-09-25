@@ -254,7 +254,10 @@ def write(
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with _LOCK:
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # jdoc#151: compact. Every reader json.loads it, so indent=2 served
+        # nobody and cost 7x the write time and 84% more bytes on a
+        # 36,000-section graph (2.37 s / 76.9 MB -> 0.33 s / 41.8 MB).
+        tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
         tmp.replace(path)
     return data["section_count"]
 
