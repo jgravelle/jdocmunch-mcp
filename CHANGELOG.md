@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.145.0] - 2026-09-24 - an incremental index spent its time on files that had not changed
+
+Most of this release comes from one report. [@LuigiNicaPRO](https://github.com/LuigiNicaPRO)
+profiled an incremental `index_local` on a 3,771-file corpus (#140) that
+took about 28 s whether 1 file changed or 50. It was split into #140, #141,
+#142 and #143, and a fifth issue, #146, turned up while they benchmarked one of
+the fixes. #151 was found while profiling #142. #138 (@sdjrdriver) is
+separate: a savings figure stuck at zero.
+
 ### Fixed - `related.json` was written pretty-printed (#151)
 
 Found while profiling #142. `related_persist.write` used `json.dumps(indent=2)`
@@ -186,6 +195,12 @@ Measured with a 289 MB sidecar (36,925 rows of 384 dimensions, a
 fake provider, Windows, median of 3): a 3-section pass took 12.99 s before
 and 5.00 s after, with 36,927 rows either way. Most of what remains is parsing
 the sidecar, which is #140.
+
+**Independently verified by the reporter** on the real corpus (279 MB
+sidecar, 36,925 sections, fastembed, macOS arm64, two fresh-copy trials per
+side): `embed_sections` 10.3 s → 4.6 s and the whole run 44.7 s → 38.0 s,
+with the slowest run on the fix still 3.1 s faster than the fastest on
+master. The resulting sidecars were byte-identical on both sides.
 
 `tests/test_jdoc_141_sidecar_append.py` (7). Each guard was proven by removing
 it: the append path, the `prune` exclusion, the newline guard, and the

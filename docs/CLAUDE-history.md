@@ -21,6 +21,43 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-09-24 — v1.142.0
+
+Moved out of `CLAUDE.md` on 2026-09-24 when v1.145.0 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first:
+an unbounded list field on 1.x cannot be capped later, so the cap and its
+disclosure keys arrive with the field.
+
+## v1.142.0 — #132: the change set `index_local` already had (whakomatic)
+
+**`index_local` computed the new / changed / deleted lists and every file's
+mtime, then returned three counts.** Now `changes` (`{doc_path, status,
+mtime}`, newest first), `changes_total` and `changes_truncated`, on all three
+success shapes including "No changes detected" (`[]`, `0`, `false`, so nobody
+branches on presence). Contributor PR, merged as `a01c2b2` before any CHANGELOG
+work of ours (policy 3b).
+
+⚠⚠ **`CHANGES_CAP = 50` was settled BEFORE merge, and that ordering is the
+lesson.** The first head returned every file. Measured on this repo, 315 files
+on a full index: `changes` was 39,755 of 41,129 response bytes; capped, the
+response is 7,673. **An unbounded list on 1.x cannot be bounded later** — a
+caller who read it as complete has a behaviour change, so the cap and its
+disclosure keys must arrive with the field. ⚠ The sibling key was the tell:
+the same response already capped `files` at 20.
+
+⚠ **The cap is a head cut and deleted entries sort LAST, so deletions drop
+first.** The `new` / `changed` / `deleted` counts are the authority, never
+`len(changes)`. The tool description says so.
+
+⚠ `discover_doc_files` and `_resolve_explicit_paths` now return FOUR values
+(mtimes last). No callers outside `tools/index_local.py`;
+`tools/index_repo.py::discover_doc_files` is a different function. ⚠ `mtime`
+is naive local ISO time on purpose, matching `indexed_at`.
+
+Request-changes to fixed head took under a day inside the 24-hour timebox;
+fork owner is a `User`, so our push was available and not needed.
+`tests/test_file_recency.py` (8). No tool, schema or INDEX_VERSION change.
+
 ## Rotated 2026-09-21 — v1.141.0
 
 Moved out of `CLAUDE.md` on 2026-09-21 when v1.144.0 became a fourth dated

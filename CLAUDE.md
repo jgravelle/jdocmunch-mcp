@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.144.0 |
+**Version:** 1.145.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,69 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.145.0 — an incremental index spent its time on files that had not changed
+
+**One report became seven fixes.** @LuigiNicaPRO profiled an incremental
+`index_local` on 3,771 files that cost about 28 s whether 1 file changed or 50
+(#140). Split under policy 1 into #140 / #141 / #142 / #143, plus #146 found
+while they benchmarked #144, plus #151 found by us while profiling #142.
+#138 (@sdjrdriver, `tokens_saved` stuck at 0) shipped alongside. They
+independently benchmarked #145 on the real corpus, and those figures are in the
+CHANGELOG, credited.
+
+⚠⚠ **A profile names FUNCTIONS, not passes. Count the reads yourself.** The
+reporter saw 73,814 `_loader` calls as one cost; they were two full passes
+(BM25 stats + the #117 sidecar rebuild) through the same loader. And "sidecar
+parsed 4x" was 3 full parses plus header-only reads. A spy on
+`Path.open`/`builtins.open` that records the caller settles it in one run.
+
+⚠⚠ **Measure what dominates BEFORE designing the clever fix.** #142 proposed a
+BM25 delta. The profile put 25.6 s of 48.5 s in per-section `open`s and 5.3 s
+in tokenizing, so reading each file once took the cost and the delta was
+SHELVED: it can't be exact without storing the uncapped `df` plus a total
+tie-break, which moves ranking. ⚠ Found and NOT fixed: `df` is capped at 5,000
+and on this repo the cut falls inside a 1,848-term tie at count 1, so section
+order decides which terms survive. A full and an incremental build of the
+same files can differ.
+
+⚠⚠ **A memo of what is on disk is trusted only on (size, `mtime_ns`)**
+(`embeddings/cache.py::_KEY_MEMO`, #140). The #107 coverage report exists to
+describe the DISK, so a view passed along from the start of the run would
+report the wrong thing. A size-only check misses a same-size rewrite, and a
+test proves it. ⚠ A cache on the long-lived `_content_loader` could serve old
+bytes after a save, so the #142 whole-file cache is scoped to the stats pass,
+where kept files cannot change.
+
+⚠⚠ **An append equals a rewrite ONLY on a matching identity with no prune**
+(#141). The rewrite is how rotation (#109) and `prune` (#107) retract rows.
+It also already kept superseded rows, so the append changes no file size. My
+own issue text claimed otherwise and was corrected on the thread.
+
+⚠⚠ **A path fix is a MIGRATION** (#146). Every root now resolves through
+`storage/paths.py`, with a ratchet test against a new `".doc-index"` literal.
+Correcting the path alone would have re-embedded every CLI user's corpus. So
+`cache.load` reads the old home-root copy (base_path None + env set only), and
+the pass rewrites it next to the index. ⚠⚠ **`cache.identity` must NOT fall
+back:** it would let #141's append path match the home header and append
+headerless rows to a new file. A test pins both halves.
+
+⚠ **A property checked on an in-memory object says nothing about the reloaded
+one** (#138). `Section.to_dict` drops `content`, so the old byte-mass audit
+(1.0000 ratio) passed on fresh sections while every reloaded index summed to 0.
+The fix raises self-reported telemetry, and it shipped with the basis change
+disclosed in CHANGELOG and TOKEN_SAVINGS.md.
+
+⚠ **Open, not shipped:** #152 (`related_persist.lookup` parses the whole
+`related.json`, 1.99 s and 220 MB resident at 36k sections, so a memo is the
+wrong fix; one-section-per-line with offsets is the candidate, pending a
+ruling). And the related graph's semantic half measured **86 s** at 36k
+sections on this box with random 16-dim vectors. That's unverified on real
+vectors and on the reporter's machine, so it is NOT a claim until measured.
+
+⚠ **Merging:** the agent's `gh pr merge --admin` is refused by the permission
+classifier. Hand jjg the cmd.exe line, and name the PR number: I once gave the
+issue number, which returns "Could not resolve to a PullRequest".
 
 ## v1.144.0 — #135/#136: a repository's documents had no time, and the commit date was already in hand
 
@@ -117,37 +180,7 @@ change. Squash `f732e92`; all 12 CI jobs green on that SHA before the bump.
 `CHANGELOG.md` ship in the sdist, so the artifacts were REBUILT and CI re-read
 on the new SHA before upload. A docs-only commit after a build still stales it.
 
-## v1.142.0 — #132: the change set `index_local` already had (whakomatic)
-
-**`index_local` computed the new / changed / deleted lists and every file's
-mtime, then returned three counts.** Now `changes` (`{doc_path, status,
-mtime}`, newest first), `changes_total` and `changes_truncated`, on all three
-success shapes including "No changes detected" (`[]`, `0`, `false`, so nobody
-branches on presence). Contributor PR, merged as `a01c2b2` before any CHANGELOG
-work of ours (policy 3b).
-
-⚠⚠ **`CHANGES_CAP = 50` was settled BEFORE merge, and that ordering is the
-lesson.** The first head returned every file. Measured on this repo, 315 files
-on a full index: `changes` was 39,755 of 41,129 response bytes; capped, the
-response is 7,673. **An unbounded list on 1.x cannot be bounded later** — a
-caller who read it as complete has a behaviour change, so the cap and its
-disclosure keys must arrive with the field. ⚠ The sibling key was the tell:
-the same response already capped `files` at 20.
-
-⚠ **The cap is a head cut and deleted entries sort LAST, so deletions drop
-first.** The `new` / `changed` / `deleted` counts are the authority, never
-`len(changes)`. The tool description says so.
-
-⚠ `discover_doc_files` and `_resolve_explicit_paths` now return FOUR values
-(mtimes last). No callers outside `tools/index_local.py`;
-`tools/index_repo.py::discover_doc_files` is a different function. ⚠ `mtime`
-is naive local ISO time on purpose, matching `indexed_at`.
-
-Request-changes to fixed head took under a day inside the 24-hour timebox;
-fork owner is a `User`, so our push was available and not needed.
-`tests/test_file_recency.py` (8). No tool, schema or INDEX_VERSION change.
-
-## Lessons from rotated entries (v1.116.0–v1.141.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21)
+## Lessons from rotated entries (v1.116.0–v1.142.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -156,6 +189,12 @@ entry that earned no reusable rule got no line.
 
 **Releasing**
 
+- ⚠⚠ **An unbounded list field on 1.x cannot be capped later, so the cap
+  and its `*_total` / `*_truncated` keys arrive WITH the field.** Measure
+  the response in bytes on a real repo and read the sibling keys: #132's
+  `changes` was 39,755 of 41,129 bytes while the same response already
+  capped `files`. A head cut drops whatever sorts last (deletions there), so
+  the counts are the authority, never `len(list)`. (v1.142.0)
 - ⚠⚠ **The build reads the WORKING TREE, not HEAD.** v1.134.0 was built in the
   main checkout while a concurrent session held uncommitted edits there, and
   they went into the published wheel — caught only by a post-publish credential
@@ -464,7 +503,7 @@ sections 15,967 — ratio exactly **1.0000**. ⚠⚠ **It is clean for a REASON,
 by luck, and the reason is load-bearing**: if section bodies ever become
 descendant-inclusive, every one of those sums silently starts double-counting.
 ⚠⚠ **Those sums were ALSO zero the whole time, and this audit could not see
-it** (#138, @sdjrdriver, fixed 2026-09-24, unreleased).
+it** (#138, @sdjrdriver, fixed in 1.145.0).
 `Section.to_dict` drops `content` for byte-addressed sections, so on any index
 READ BACK FROM DISK the sum is 0 and `tokens_saved` floors to 0. The 1.0000
 ratio was measured on freshly parsed sections, which still carry content.
@@ -968,7 +1007,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.141.0 rotated there 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.142.0 rotated there 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
