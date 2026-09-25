@@ -22,14 +22,36 @@ file, Windows, median of 3): 44.03 s before, 37.67 s after. Peak traced
 memory was 572 MB before and 575 MB after. The rebuild already held every
 body in memory, so recording them earlier doesn't add a second copy.
 
-⚠ **Part 2 of #142 isn't in this entry.** Updating the BM25 stats by delta
-instead of recomputing them can't be exact from the stored stats. `df` is
-capped at the top 5,000 terms, and on this repository the cut falls inside
-the count-1 tail, 1,848 terms tied, where which terms survive depends on
-section order. So today a full build and an incremental build can already
-keep different rare terms. An exact delta needs the uncapped counts stored
-and a total tie-break at the cap, which changes ranking at the margin. That
-is a separate decision, with replay numbers, before any change.
+### Fixed - the BM25 stats pass opened a file once per section (#142, part 2)
+
+A profile of that 36k-section incremental run put 25.6 s of 48.5 s in the
+stats pass's reads: 35,989 `open`s, one per section. Tokenizing, the actual
+BM25 work, was 5.3 s. The stats pass now reads each kept file whole, once, and
+slices its sections from it. Only one file is held at a time, because a
+document's sections are contiguous. The slice is taken on BYTES, as the
+per-section loader does. A character slice would drift after the first
+multibyte character and still produce plausible tokens, so a test compares
+the stats against the per-section loader on accented and CJK text. The cache
+exists only for this pass: kept files can't change until the save's writes,
+whereas a cache on the index's long-lived loader could serve old bytes after
+a save.
+
+Same corpus: 37.46 s → 30.45 s, and peak memory unchanged at 575 MB. With
+part 1, this incremental run went from 44.03 s to 30.45 s. Two mutations
+were caught: a character slice fails the multibyte test, and the
+per-section loader fails the one-open-per-file test.
+
+⚠ **The BM25 delta #142 proposed was measured and NOT built.** Recomputing
+costs 5.3 s of tokenizing on this corpus, and an exact delta isn't possible
+from the stored stats. `df` is capped at the top 5,000 terms, and on this
+repository the cut falls inside a 1,848-term tie at count 1, where section
+order picks the survivors. An exact delta would need the uncapped counts
+stored and a total tie-break, which moves ranking at the margin. That trade
+isn't worth 5.3 s.
+
+⚠ Found along the way and NOT changed here: section order breaks that tie,
+so a full build and an incremental build of the same files can already keep
+different rare terms in `df`.
 
 `tests/test_jdoc_142_shared_content_read.py` (3). Without the reuse, the
 read-count test sees 354 reads where the limit is 177. The equivalence test
