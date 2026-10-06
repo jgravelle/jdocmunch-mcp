@@ -43,6 +43,7 @@ DEFAULT_REDISCOVER_INTERVAL_S = 30.0
 # that recurs at once (a root awatch cannot set up) restarts the loop as fast
 # as the watcher can be rebuilt: one core, for as long as it runs.
 ERROR_RETRY_INITIAL_S = 1.0
+ERROR_RETRY_MAX_DOUBLINGS = 16
 # Poll interval used ONLY when watchfiles falls back to polling (it auto-enables
 # polling under WSL, where inotify is unreliable across the boundary). Mirrors
 # jcodemunch's WSL CPU fix (jcm #356): raise it to cut idle CPU on many-repo
@@ -303,6 +304,17 @@ async def _handle_changes(
             logger.warning("reindex failed for %s", name, exc_info=True)
 
 
+def _error_retry_delay(consecutive_errors: int, ceiling_s: float) -> float:
+    """Seconds to wait before the next awatch attempt in an error streak.
+
+    The exponent is capped: `float * 2 ** 1024` raises OverflowError, which
+    from inside the loop's `except` handler would end the watcher on the
+    1,025th consecutive error.
+    """
+    doublings = min(max(consecutive_errors, 1) - 1, ERROR_RETRY_MAX_DOUBLINGS)
+    return min(ceiling_s, ERROR_RETRY_INITIAL_S * 2 ** doublings)
+
+
 # ── main loop ───────────────────────────────────────────────────────────────
 
 
@@ -432,8 +444,7 @@ async def watch_docs(
             stop_event.set()
         except Exception as exc:
             consecutive_errors += 1
-            retry_delay = min(rediscover_interval_s,
-                              ERROR_RETRY_INITIAL_S * 2 ** (consecutive_errors - 1))
+            retry_delay = _error_retry_delay(consecutive_errors, rediscover_interval_s)
             logger.warning("awatch loop error (%d in a row); retrying in %.0fs",
                            consecutive_errors, retry_delay, exc_info=consecutive_errors == 1)
             if consecutive_errors == 1:
@@ -456,6 +467,18 @@ async def watch_docs(
                 await asyncio.wait_for(stop_event.wait(), timeout=retry_delay)
             except asyncio.TimeoutError:
                 pass
+            if not stop_event.is_set() and not discovery_changed:
+                # A cycle that fails at once cancels _monitor before its first
+                # pass, so during an error streak this is the only rediscovery.
+                # Without it a root that vanished is retried forever.
+                try:
+                    current = dict(discover_local_doc_repos(storage_path))
+                except Exception:
+                    logger.warning("rediscover pass failed", exc_info=True)
+                else:
+                    if current != roots_map:
+                        discovery_changed = True
+                        new_map = current
 
         if discovery_changed and not stop_event.is_set():
             roots_map = new_map

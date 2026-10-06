@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Fixed - a directory the watcher can't read under one root stopped the watch of every root (#155)
+
+Reported and fixed by [@Indie-Siggi](https://github.com/Indie-Siggi) (#157).
+Every locally-indexed root goes into one `awatch` call. A directory the user
+can't read under any of them made watchfiles raise `PermissionError` during
+setup, and then no root was watched: an edit in a readable repo was never
+re-indexed. `awatch` now gets `ignore_permission_denied=True`, so the
+unreadable directory is skipped and the rest is watched. The argument needs
+watchfiles 0.20.0; the floor here is 0.21.0.
+
+`tests/test_watch_permission_denied.py` runs the real `watch` in a subprocess
+with a mode-000 directory under one root. It's skipped on Windows and as root,
+where mode 000 doesn't bind.
+
+### Fixed - a recurring `awatch` error restarted the watch loop at once and used a full core (#156)
+
+Reported and fixed by [@Indie-Siggi](https://github.com/Indie-Siggi) (#158).
+After an error the loop logged a WARNING and began the next cycle immediately.
+Their measurement on the #155 reproduction: 116% of a core and about 50,000
+log lines in 14 s, against 0% and 4 lines with the fix.
+
+The next attempt now waits 1 s, doubling per consecutive error up to the
+rediscovery interval (30 s by default). A cycle that ends without an error
+resets it, and a stop request still ends the watcher at once. The first error
+of a streak is printed, so `watch` without `--quiet` and the log file show it.
+The WARNING text changed: it carries the streak count and the delay.
+
+Two defects in that retry path were found in review and fixed before release:
+
+- **#159.** The delay was computed as `1.0 * 2 ** (n - 1)` and capped
+  afterwards. At n = 1025 the int can't convert to float, and the
+  `OverflowError` came from inside the `except` handler, so the watcher
+  exited. At the default ceiling that's about 8.5 hours of one recurring
+  error, computed from the constants. The exponent is now capped first.
+- **#160.** Rediscovery ran only in a monitor task whose first pass came one
+  interval after the cycle began, and a cycle that failed at once cancelled it
+  before that. So while `awatch` kept failing, a root that had vanished stayed
+  in the set and was retried forever. This predates #158: on earlier versions
+  the same state was the tight loop. One discovery pass now follows each retry
+  wait.
+
+`tests/test_watch_error_backoff.py` (1, theirs) and
+`tests/test_watch_error_streak.py` (2). Both of ours fail with their fix
+removed.
+
 ## [1.145.0] - 2026-09-24 - an incremental index spent its time on files that had not changed
 
 Most of this release comes from one report. [@LuigiNicaPRO](https://github.com/LuigiNicaPRO)
