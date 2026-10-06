@@ -42,6 +42,14 @@ the 'broken links' golden (nDCG 0.926 against 0.95, recall 1.0). Reworded to
 "symlinks"; goldens and gate untouched. Run `tests/test_replay_metrics.py`
 after every CHANGELOG edit, not only at release.
 
+⚠ **A PR that reads `BLOCKED` with every job green may have NO `license/cla`
+status at all.** CLA Assistant did not fire when #162 opened (count=0 on the
+head, no bot comment). A GET to
+`https://cla-assistant.io/check/jgravelle/jdocmunch-mcp?pullRequest=<n>`
+posted `license/cla=success` within seconds, with no push and no CI re-run.
+Measured once, on our own PR; unverified for a contributor who has not
+signed, where absent still means NOT SIGNED.
+
 ⚠ **WSL Ubuntu on this box runs Linux tests**, which is how the inotify count
 was measured (28 before, 2 after). Sync into a Linux-side venv
 (`UV_PROJECT_ENVIRONMENT=$HOME/.venvs/<name> uv sync --group dev --python
