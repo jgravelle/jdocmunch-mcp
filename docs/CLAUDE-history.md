@@ -21,6 +21,66 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-06 — v1.144.0
+
+Moved out of `CLAUDE.md` on 2026-10-06 when v1.145.2 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first:
+two producers of one key resolve on the new one, never a bare `Z`,
+`_index_to_dict` is an allow-list, and test stubs follow the seam.
+
+## v1.144.0 — #135/#136: a repository's documents had no time, and the commit date was already in hand
+
+**`index_repo` returned counts where `index_local` returns a change set, and no
+index stored a per-document time at all.** Now `changes` / `changes_total` /
+`changes_truncated` on every `index_repo` success path, and `mtime` per document
+on `list_docs` with `_meta.docs_with_mtime` beside it. Both designed by
+@whakomatic on #134, split to #135/#136 under policy 1, merged as `c61810f`.
+
+⚠⚠ **The two producers render time differently, and the key is the same key.**
+`index_local` emits naive local time, matching `indexed_at`; that shipped in
+1.142.0 and cannot change on 1.x. `index_repo` emits an offset-aware string. A
+caller comparing across a local index and a repository one without reading the
+offset is wrong by the local UTC offset. Resolved on the NEW producer, since the
+old one's format is already a promise; both tool descriptions say so.
+
+⚠⚠ **Never write a bare `Z`. `datetime.fromisoformat` gained `Z` in 3.11 and
+this package supports 3.10.** Measured on 3.10.11, `'...T13:15:39Z'` raises
+`ValueError: Invalid isoformat string` where `+00:00` parses. **No developer box
+newer than 3.10 can see it** — only the oldest matrix job fails — so
+`normalize_commit_date` converts GitHub's string rather than passing it through.
+⚠ The date cost NO extra request: `fetch_head_commit_sha` was already reading
+`GET /repos/{owner}/{repo}/commits/{ref}` and discarding `commit.committer.date`
+sitting beside `sha`. `fetch_head_commit` returns both; the sha-only spelling
+stays as a wrapper.
+
+⚠⚠ **`_index_to_dict` is an explicit ALLOW-LIST, not `asdict()`.** A field
+added to the dataclass AND to every save/load signature still round-trips as
+empty until it is named there, and nothing raises. `tests/test_jdoc_116_corpus_
+shape_inheritance.py` already records that this cost a debugging cycle once, so
+`file_mtimes` has its own test reading the JSON on disk rather than the dataclass.
+
+⚠ **A repository has no per-file modification time**, which is why this is the
+commit date and not a `stat()`. Git stores none in a tree object and a checkout
+stamps every file with the moment it was fetched. ⚠ `list_docs` reads the STORED
+time even though it already stats every document for `byte_size`: a live time
+would be fresher and would make `mtime` mean filesystem-time on a local index
+and commit-time on a repository one. One index, one meaning.
+
+⚠ Measured before merge, per #132's own lesson: **+30 bytes per document, flat**
+— +29.6% on a 125-document index, +8,130 B on 271. `list_docs` is uncapped and
+jdoc has no response ceiling, so nothing refuses; it grows with the corpus.
+
+⚠ **The test stubs had to follow the seam.** 16 patch sites in
+`tests/test_index_repo_sha.py` stubbed `fetch_head_commit_sha`, which no longer
+issues the request — so the real HTTP call was live and those tests were passing
+for the wrong reason. A `_patch_head` adapter stubs both names and reuses every
+existing fake unchanged.
+
+`tests/test_jdoc_135_136_document_recency.py` (14), proven non-vacuous: remove
+the serializer line and 5 fail. No tool, schema or INDEX_VERSION change; an index
+written before this reads back as `{}`. All 12 CI jobs green on `b696111` before
+the merge.
+
 ## Rotated 2026-10-06 — v1.143.0
 
 Moved out of `CLAUDE.md` on 2026-10-06 when v1.145.1 became a fourth dated

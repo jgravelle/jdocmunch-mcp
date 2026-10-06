@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.145.1 |
+**Version:** 1.145.2 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -10,9 +10,8 @@ into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
 
-## Unreleased (after 1.145.1) — #154: the watcher walked through directory links
+## v1.145.2 — #154: the watcher walked through directory symlinks
 
-⚠ **Fold this into the next dated section at the bump; it is not a release.**
 Reported by @Indie-Siggi. On Linux inotify and under polling, a recursive
 `awatch` follows directory links before any filter runs; indexing never does.
 Measured on inotify, watchfiles 1.3.0: a root of 2 directories with a link to
@@ -152,60 +151,7 @@ vectors and on the reporter's machine, so it is NOT a claim until measured.
 classifier. Hand jjg the cmd.exe line, and name the PR number: I once gave the
 issue number, which returns "Could not resolve to a PullRequest".
 
-## v1.144.0 — #135/#136: a repository's documents had no time, and the commit date was already in hand
-
-**`index_repo` returned counts where `index_local` returns a change set, and no
-index stored a per-document time at all.** Now `changes` / `changes_total` /
-`changes_truncated` on every `index_repo` success path, and `mtime` per document
-on `list_docs` with `_meta.docs_with_mtime` beside it. Both designed by
-@whakomatic on #134, split to #135/#136 under policy 1, merged as `c61810f`.
-
-⚠⚠ **The two producers render time differently, and the key is the same key.**
-`index_local` emits naive local time, matching `indexed_at`; that shipped in
-1.142.0 and cannot change on 1.x. `index_repo` emits an offset-aware string. A
-caller comparing across a local index and a repository one without reading the
-offset is wrong by the local UTC offset. Resolved on the NEW producer, since the
-old one's format is already a promise; both tool descriptions say so.
-
-⚠⚠ **Never write a bare `Z`. `datetime.fromisoformat` gained `Z` in 3.11 and
-this package supports 3.10.** Measured on 3.10.11, `'...T13:15:39Z'` raises
-`ValueError: Invalid isoformat string` where `+00:00` parses. **No developer box
-newer than 3.10 can see it** — only the oldest matrix job fails — so
-`normalize_commit_date` converts GitHub's string rather than passing it through.
-⚠ The date cost NO extra request: `fetch_head_commit_sha` was already reading
-`GET /repos/{owner}/{repo}/commits/{ref}` and discarding `commit.committer.date`
-sitting beside `sha`. `fetch_head_commit` returns both; the sha-only spelling
-stays as a wrapper.
-
-⚠⚠ **`_index_to_dict` is an explicit ALLOW-LIST, not `asdict()`.** A field
-added to the dataclass AND to every save/load signature still round-trips as
-empty until it is named there, and nothing raises. `tests/test_jdoc_116_corpus_
-shape_inheritance.py` already records that this cost a debugging cycle once, so
-`file_mtimes` has its own test reading the JSON on disk rather than the dataclass.
-
-⚠ **A repository has no per-file modification time**, which is why this is the
-commit date and not a `stat()`. Git stores none in a tree object and a checkout
-stamps every file with the moment it was fetched. ⚠ `list_docs` reads the STORED
-time even though it already stats every document for `byte_size`: a live time
-would be fresher and would make `mtime` mean filesystem-time on a local index
-and commit-time on a repository one. One index, one meaning.
-
-⚠ Measured before merge, per #132's own lesson: **+30 bytes per document, flat**
-— +29.6% on a 125-document index, +8,130 B on 271. `list_docs` is uncapped and
-jdoc has no response ceiling, so nothing refuses; it grows with the corpus.
-
-⚠ **The test stubs had to follow the seam.** 16 patch sites in
-`tests/test_index_repo_sha.py` stubbed `fetch_head_commit_sha`, which no longer
-issues the request — so the real HTTP call was live and those tests were passing
-for the wrong reason. A `_patch_head` adapter stubs both names and reuses every
-existing fake unchanged.
-
-`tests/test_jdoc_135_136_document_recency.py` (14), proven non-vacuous: remove
-the serializer line and 5 fail. No tool, schema or INDEX_VERSION change; an index
-written before this reads back as `{}`. All 12 CI jobs green on `b696111` before
-the merge.
-
-## Lessons from rotated entries (v1.116.0–v1.143.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06)
+## Lessons from rotated entries (v1.116.0–v1.144.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -243,6 +189,25 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **Two producers of one key that render it differently: resolve it on
+  the NEW producer.** `index_local` emits `mtime` as naive local time and has
+  since 1.142.0, so that format is a promise. `index_repo` emits an
+  offset-aware string, and both tool descriptions say so. A caller comparing
+  the two without reading the offset is wrong by the local UTC offset.
+  (v1.144.0)
+- ⚠⚠ **Never write a bare `Z`.** `datetime.fromisoformat` gained `Z` in 3.11
+  and this package supports 3.10, where it raises `ValueError`. No developer
+  box newer than 3.10 can see it; only the oldest matrix job fails.
+  `normalize_commit_date` converts to `+00:00`. (v1.144.0)
+- ⚠⚠ **`_index_to_dict` is an explicit ALLOW-LIST, not `asdict()`.** A field
+  added to the dataclass and to every save/load signature still round-trips
+  as empty until it is named there, and nothing raises. Test a new field by
+  reading the JSON on disk, not the dataclass. (v1.144.0)
+- ⚠ **One index, one meaning for a field.** A repository has no per-file
+  modification time, so `mtime` there is the commit date. `list_docs` reads
+  the STORED time even though it stats every document, because a live time
+  would mean filesystem-time on a local index and commit-time on a
+  repository one. (v1.144.0)
 - ⚠⚠ **A flag that pre-approves config edits must not also pre-approve a
   download.** `init --yes` does NOT opt in to the ~250 MB embeddings install;
   `--with-embeddings` does. `cli/embeddings_offer.py` is the ONE module that
@@ -364,6 +329,10 @@ entry that earned no reusable rule got no line.
 
 **Testing and measurement**
 
+- ⚠ **When a seam moves, the test stubs must follow it.** 16 patch sites
+  stubbed `fetch_head_commit_sha` after it stopped issuing the request, so
+  the real HTTP call was live and those tests passed for the wrong reason.
+  Stub the name that does the I/O. (v1.144.0)
 - ⚠ **Verify an install flow by a REAL run, not only recorder tests.**
   1.143.0's was a throwaway venv with isolated home, store and model cache.
   ⚠ Seen there and NOT fixed: stdin from `/dev/null` reads as a TTY on
@@ -1053,7 +1022,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.143.0 rotated there 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.144.0 and v1.143.0 rotated there 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.145.2] - 2026-10-06 - the watcher walked through directory symlinks out of an indexed root
+
 ### Fixed - the watcher walked through directory symlinks out of an indexed root (#154)
 
 Reported by [@Indie-Siggi](https://github.com/Indie-Siggi), who also traced
