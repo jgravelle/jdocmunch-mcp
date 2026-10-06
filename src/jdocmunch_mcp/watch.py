@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DEBOUNCE_MS = 1000
 DEFAULT_REDISCOVER_INTERVAL_S = 30.0
+# After an awatch error the next attempt waits this long, doubling per
+# consecutive error up to the rediscovery interval. Without a wait, an error
+# that recurs at once (a root awatch cannot set up) restarts the loop as fast
+# as the watcher can be rebuilt: one core, for as long as it runs.
+ERROR_RETRY_INITIAL_S = 1.0
 # Poll interval used ONLY when watchfiles falls back to polling (it auto-enables
 # polling under WSL, where inotify is unreliable across the boundary). Mirrors
 # jcodemunch's WSL CPU fix (jcm #356): raise it to cut idle CPU on many-repo
@@ -363,6 +368,7 @@ async def watch_docs(
             quiet=quiet, log_file_handle=log_file_handle,
         )
 
+    consecutive_errors = 0
     while not stop_event.is_set():
         if not roots_map:
             # Nothing to watch yet — poll discovery until a repo appears or stop.
@@ -405,6 +411,7 @@ async def watch_docs(
                         return
 
         monitor_task = asyncio.create_task(_monitor())
+        retry_delay = 0.0
         try:
             async for changes in awatch(
                 *roots,
@@ -423,13 +430,31 @@ async def watch_docs(
                 )
         except (KeyboardInterrupt, asyncio.CancelledError):
             stop_event.set()
-        except Exception:
-            logger.warning("awatch loop error", exc_info=True)
+        except Exception as exc:
+            consecutive_errors += 1
+            retry_delay = min(rediscover_interval_s,
+                              ERROR_RETRY_INITIAL_S * 2 ** (consecutive_errors - 1))
+            logger.warning("awatch loop error (%d in a row); retrying in %.0fs",
+                           consecutive_errors, retry_delay, exc_info=consecutive_errors == 1)
+            if consecutive_errors == 1:
+                _watcher_output(
+                    f"jdocmunch-mcp watch: watching failed ({type(exc).__name__}: {exc}); "
+                    f"retrying with backoff up to {rediscover_interval_s:.0f}s.",
+                    quiet=quiet, log_file_handle=log_file_handle,
+                )
+        else:
+            consecutive_errors = 0
         finally:
             monitor_task.cancel()
             try:
                 await monitor_task
             except (asyncio.CancelledError, Exception):
+                pass
+
+        if retry_delay and not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=retry_delay)
+            except asyncio.TimeoutError:
                 pass
 
         if discovery_changed and not stop_event.is_set():
