@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+### Fixed - the watcher walked through directory symlinks out of an indexed root (#154)
+
+Reported by [@Indie-Siggi](https://github.com/Indie-Siggi), who also traced
+the cause and pointed at jcodemunch's fix for the same thing.
+
+`watch` handed every root to one recursive `awatch`. On Linux inotify and
+under polling, watchfiles walks the tree to register it and follows directory
+links while it does, before any filter runs. Indexing never follows them
+(`followlinks=False`). So a symlink inside a root made the watcher register a
+tree that indexing never reads: their root with one symlink to `/usr/share` held
+4,393 inotify watches, and one to `/` (a Wine prefix's `dosdevices/z:`)
+walked the readable filesystem. Reproduced here on inotify with watchfiles
+1.3.0: a root of 2 directories with a symlink to `/usr/share` held 2,476
+watches.
+
+No file outside a root was ever indexed this way. An event's path is resolved
+before it is matched to a root, and a path that resolves outside every root
+is dropped. The cost was watches, the walk, and the errors from #155.
+
+On Linux and under polling the watcher now enumerates the real directories
+under each root with `os.walk(followlinks=False)` and watches that set
+non-recursively. watchfiles doesn't expose notify's `follow_symlinks`, which
+is why the set is enumerated. macOS and Windows native watching take one
+recursive watch per root, do no such walk, and are unchanged.
+
+The set is pruned by one rule, "not a directory symlink". Discovery also skips
+dot-directories and ignored paths, and the watcher deliberately doesn't: a
+directory that discovery reads and the watcher skips is a directory whose
+edits are never seen.
+
+A non-recursive watch has to be told about a new directory, so three things
+came with it:
+
+- A directory added or removed under a watched one re-enumerates and re-arms.
+- A file written into a new directory before that directory has a watch
+  raises no event. Each directory that is new since the last armed set is
+  read once, after the new watches exist.
+- The rediscovery pass (30 s by default) also compares the directory set, in
+  case a directory event never arrived.
+
+Not changed: a directory renamed out of a root still leaves its documents in
+the index until the next full index, as it did under the recursive watch.
+
+`tests/test_jdoc_154_watch_no_link_descent.py` (16). One counts the inotify
+watches of the real `watch` process, Linux only: 28 before the change, 2
+after. One runs the real process under polling on every platform. Run on
+Linux here under WSL as well as on Windows.
+
 ## [1.145.1] - 2026-10-06 - one root the watcher could not set up stopped the watch of every root
 
 Four fixes to `watch`, all on one mechanism: every locally-indexed root goes

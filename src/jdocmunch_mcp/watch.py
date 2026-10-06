@@ -30,7 +30,9 @@ import asyncio
 import logging
 import os
 import signal
+import stat
 import sys
+from contextlib import aclosing
 from pathlib import Path
 from typing import IO, Optional
 
@@ -126,6 +128,86 @@ def _watch_poll_delay_ms() -> int:
     return DEFAULT_WATCH_POLL_DELAY_MS
 
 
+def _force_polling_default() -> bool:
+    """Whether watchfiles will poll when the caller passes ``force_polling=None``.
+
+    The authority is watchfiles' own ``_default_force_polling``, a PRIVATE name
+    that a release may rename. The fallback restates its documented rule:
+    ``WATCHFILES_FORCE_POLLING`` when set (any value but
+    ``false``/``disable``/``disabled`` means poll), else WSL detection. Same
+    shape as jcodemunch's helper of the same name.
+    """
+    try:
+        from watchfiles.main import _default_force_polling
+    except ImportError:
+        env_var = os.getenv("WATCHFILES_FORCE_POLLING")
+        if env_var:
+            return env_var.lower() not in {"false", "disable", "disabled"}
+        return _is_wsl()
+    return bool(_default_force_polling(None))
+
+
+def _native_recursion_is_safe(force_polling: bool) -> bool:
+    """True where a recursive watch does not walk through directory links.
+
+    jdoc#154: on Linux (inotify) and under polling, watchfiles walks the tree
+    to register it and follows directory links while it does, before any
+    filter runs. Measured on inotify with watchfiles 1.3.0: a root of 2
+    directories holding one link to ``/usr/share`` held 2,476 watches.
+    watchfiles does not expose notify's ``follow_symlinks``, so there the
+    watcher hands it an enumerated set of real directories instead. macOS
+    FSEvents and Windows ReadDirectoryChangesW take one recursive watch per
+    root and do no such walk.
+    """
+    return sys.platform != "linux" and not force_polling
+
+
+def _watch_directories(roots) -> "dict[str, tuple[int, int]]":
+    """Every real directory under ``roots``, mapped to its (device, inode).
+
+    Directory links are never entered, which is what `discover_doc_files`
+    does with its default ``followlinks=False``.
+
+    ⚠ That is the ONLY rule applied here, on purpose. Discovery also prunes
+    dot-directories, SKIP_PATTERNS and ignored paths, but a directory that
+    discovery reads and this skips is a directory whose edits are never seen.
+    Pruning less than discovery costs watches; pruning more loses updates.
+
+    The identity lets a caller see a directory REPLACED at the same path,
+    which needs a new native watch.
+    """
+    directories: "dict[str, tuple[int, int]]" = {}
+    for root in roots:
+        for current, dirs, _files in os.walk(root, followlinks=False):
+            try:
+                st = os.stat(current, follow_symlinks=False)
+            except OSError:
+                dirs[:] = []
+                continue
+            if not stat.S_ISDIR(st.st_mode):
+                dirs[:] = []  # a link, not a real directory
+                continue
+            directories[current] = (st.st_dev, st.st_ino)
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(current, d))]
+    return directories
+
+
+def _doc_files_in(directories, doc_exts: set[str]) -> "list[str]":
+    """Doc-extension entries directly inside each of ``directories``."""
+    found: "list[str]" = []
+    for directory in directories:
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if os.path.splitext(entry.name)[1].lower() not in doc_exts:
+                        continue
+                    if not entry.is_dir(follow_symlinks=False):
+                        found.append(entry.path)
+        except OSError:
+            continue
+    return found
+
+
 def _is_wsl() -> bool:
     if sys.platform != "linux":
         return False
@@ -164,13 +246,31 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, stop: asyncio.Even
 # ── change routing ──────────────────────────────────────────────────────────
 
 
-def _make_watch_filter(doc_exts: set[str], storage_path: str):
+def _is_topology_change(change, path: str, watched_dirs) -> bool:
+    """True when a directory under an enumerated watch was added or removed."""
+    if getattr(change, "name", "") not in ("added", "deleted"):
+        return False
+    if path in watched_dirs:
+        return True
+    return os.path.isdir(path) and not os.path.islink(path)
+
+
+def _make_watch_filter(doc_exts: set[str], storage_path: str, watched: Optional[dict] = None):
+    """Filter to documentation files outside our own storage tree.
+
+    ``watched`` (jdoc#154) is a holder the loop fills with the enumerated
+    directory set, under ``"dirs"``. While it is set, a directory being added
+    or removed also passes: a non-recursive watch has to be told about a new
+    directory, and that event is the only prompt notice of one.
+    """
     storage_abs = os.path.normcase(os.path.abspath(storage_path)) if storage_path else None
 
     def _filter(_change, path: str) -> bool:
         ext = os.path.splitext(path)[1].lower()
         if ext not in doc_exts:
-            return False
+            dirs = watched.get("dirs") if watched is not None else None
+            if dirs is None or not _is_topology_change(_change, path, dirs):
+                return False
         if storage_abs:
             ap = os.path.normcase(os.path.abspath(path))
             if ap == storage_abs or ap.startswith(storage_abs + os.sep):
@@ -333,7 +433,7 @@ async def watch_docs(
     rediscovery pass. Repos whose source_root disappears are dropped.
     """
     try:
-        from watchfiles import awatch
+        from watchfiles import Change, awatch
     except ImportError:
         _watcher_output(
             "jdocmunch-mcp watch: the 'watchfiles' package is required. "
@@ -344,8 +444,15 @@ async def watch_docs(
 
     storage_path = storage_path or doc_storage_path_default()
     doc_exts = _doc_extensions()
-    watch_filter = _make_watch_filter(doc_exts, storage_path)
+    watched: dict = {"dirs": None}
+    watch_filter = _make_watch_filter(doc_exts, storage_path, watched)
     poll_delay = _watch_poll_delay_ms()
+    force_polling = _force_polling_default()
+    recursive = _native_recursion_is_safe(force_polling)
+    # jdoc#154, enumerated mode only: the last directory set whose watches
+    # were armed and caught up, and the roots it covered.
+    armed_census: "Optional[dict[str, tuple[int, int]]]" = None
+    armed_roots: "set[str]" = set()
 
     stop_event = asyncio.Event()
     try:
@@ -421,25 +528,78 @@ async def watch_docs(
                         new_map = current
                         cycle_stop.set()
                         return
+                    if census is not None:
+                        # Safety net for a directory event that never came.
+                        if await asyncio.to_thread(_watch_directories, roots) != census:
+                            cycle_stop.set()
+                            return
 
+        census: "Optional[dict[str, tuple[int, int]]]" = None
         monitor_task = asyncio.create_task(_monitor())
         retry_delay = 0.0
         try:
-            async for changes in awatch(
-                *roots,
+            watch_paths: list = roots
+            enumerated_kwargs: dict = {}
+            if not recursive:
+                census = await asyncio.to_thread(_watch_directories, roots)
+                if not census:
+                    raise FileNotFoundError("no watchable directory under any root")
+                watch_paths = list(census)
+                # A yield within a second even when nothing changed: the first
+                # one is the signal that the watches are armed.
+                enumerated_kwargs = {"rust_timeout": 1000, "yield_on_timeout": True}
+            watched["dirs"] = census
+            armed = False
+            stream = awatch(
+                *watch_paths,
                 watch_filter=watch_filter,
                 debounce=debounce_ms,
                 stop_event=cycle_stop,
                 poll_delay_ms=poll_delay,
+                force_polling=force_polling,
+                recursive=recursive,
                 # Every root shares this one watcher: without this, one
                 # directory it cannot read under ANY root ends the watch of
                 # every repo.
                 ignore_permission_denied=True,
-            ):
-                await _handle_changes(
-                    changes, roots_map, storage_path,
-                    use_ai_summaries, quiet, log_file_handle,
-                )
+                **enumerated_kwargs,
+            )
+            async with aclosing(stream):
+                async for changes in stream:
+                    rearm = False
+                    if census is not None:
+                        if not armed:
+                            # A directory that is new since the last armed set
+                            # had no watch until now, so a file written into it
+                            # in between raised no event. Read those once.
+                            # ⚠ Only after the first yield: a scan before the
+                            # watches exist leaves the same gap after itself.
+                            armed = True
+                            if armed_census is not None:
+                                fresh = [
+                                    d for d, ident in census.items()
+                                    if armed_census.get(d) != ident
+                                    and _owning_root(d, armed_roots) is not None
+                                ]
+                                missed = await asyncio.to_thread(_doc_files_in, fresh, doc_exts)
+                                changes = set(changes) | {
+                                    (Change.added, p) for p in missed
+                                    if watch_filter(Change.added, p)
+                                }
+                            armed_census, armed_roots = census, set(roots)
+                        if any(_is_topology_change(c, p, census) for c, p in changes):
+                            rearm = await asyncio.to_thread(_watch_directories, roots) != census
+                    doc_changes = {
+                        (c, p) for c, p in changes
+                        if os.path.splitext(p)[1].lower() in doc_exts
+                    }
+                    if doc_changes:
+                        await _handle_changes(
+                            doc_changes, roots_map, storage_path,
+                            use_ai_summaries, quiet, log_file_handle,
+                        )
+                    if rearm:
+                        break  # the next cycle enumerates again and re-arms
         except (KeyboardInterrupt, asyncio.CancelledError):
             stop_event.set()
         except Exception as exc:
