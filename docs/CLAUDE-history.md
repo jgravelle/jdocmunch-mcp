@@ -21,6 +21,67 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-06 — v1.143.0
+
+Moved out of `CLAUDE.md` on 2026-10-06 when v1.145.1 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries" first:
+`--yes` never pre-approves a download, a failed step hands the next one the
+explicit off value, and a docs-only commit after a build stales the artifacts.
+
+## v1.143.0 — `init` asks once about semantic search; the default install was words-only
+
+**A default install has no embedding provider, `init` never mentioned one, and
+`use_embeddings="auto"` then resolves to word matching.** Measured on the public
+benchmark (`github.com/jgravelle/jdoc-rerank-bench`, 492 questions, 6 doc sets):
+hybrid over lexical is +0.120 [+0.097, +0.144] nDCG@5, a direct answer in the top
+5 for 47% of questions against 34%. That was the largest effect in the rerank
+study and it was already ours. See "Rerank POC ruling" below.
+
+`init` now runs `cli/embeddings_offer.py` before its index step. Provider
+resolves: say which, embed. None: ask once, **default No**. On a yes it prints
+and runs `python -m pip install "fastembed>=0.8.0"` in its own interpreter,
+downloads the model through `_FastEmbedProvider()` so the file lands where the
+server looks, and indexes with embeddings. New flag `--with-embeddings`.
+
+⚠⚠ **`--yes` does NOT opt in, and that is the design, not an omission.** A flag
+that pre-approves config edits must not also pre-approve a ~250 MB download.
+`test_yes_flag_does_not_opt_in` was proven non-vacuous with `or yes` put back.
+⚠⚠ **This is the ONE place jdocmunch runs pip or starts a download for the
+user**, and a ratchet fails if any other module under `src/` names pip. The
+server itself still never installs or downloads unasked. README "Background
+behavior, fully disclosed" carries it, and a test binds the README to the
+numbers the prompt quotes.
+
+⚠ **After a failed model download the index step gets `use_embeddings=False`,
+not `"auto"`.** fastembed is installed by then, so `"auto"` would retry the
+download silently inside the index. ⚠ The quoted figures (34 / 47 / 492 / 6 /
+160 MB / 87 MB) are constants that the test RESTATES rather than imports.
+⚠ `fastembed` stays an optional extra (jjg, 2026-09-19).
+
+`doc_list_repos` rows gain `has_embeddings` (sidecar presence, index not
+opened) and `_meta.embeddings_tip`; measured 4,120 to 4,505 bytes on 8 indexes.
+The lexical `_meta.tip` now names the install step first.
+
+⚠ **Verified by a REAL run, not only the recorder tests**: throwaway venv,
+isolated home / store / model cache, exit 0 in 119 s, `search_mode: hybrid`,
+torch not loaded. ⚠ Two pre-existing quirks seen there and NOT fixed here:
+stdin from `/dev/null` reads as a TTY on Windows (prompts EOF to "no"), and with
+`DOC_INDEX_PATH` set the embeddings sidecar is written to the store AND to
+`~/.doc-index` (the second one was FIXED as #146, 2026-09-24: every root now
+resolves through `storage/paths.py`). ⚠ Follow-up, not shipped: fastembed's default model cache is
+`<tempdir>/fastembed_cache`, which an OS cleanup can empty.
+
+⚠ I lost uncommitted `init.py` edits by reverting a mutation check with
+`git checkout -- <file>`. **Commit a checkpoint before mutating a file you have
+uncommitted work in**, or mutate a copy.
+
+`tests/test_init_embeddings_offer.py` (17). No tool, schema or INDEX_VERSION
+change. Squash `f732e92`; all 12 CI jobs green on that SHA before the bump.
+⚠ **Released from `31def2a`, not the bump commit `45dd13e`**: a docs commit
+(ROADMAP's rerank / Jev entry) followed the bump, and `ROADMAP.md` and
+`CHANGELOG.md` ship in the sdist, so the artifacts were REBUILT and CI re-read
+on the new SHA before upload. A docs-only commit after a build still stales it.
+
 ## Rotated 2026-09-24 — v1.142.0
 
 Moved out of `CLAUDE.md` on 2026-09-24 when v1.145.0 became a fourth dated

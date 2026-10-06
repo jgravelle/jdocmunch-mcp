@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.145.1] - 2026-10-06 - one root the watcher could not set up stopped the watch of every root
+
+Four fixes to `watch`, all on one mechanism: every locally-indexed root goes
+into a single `awatch` call, so a failure on one root is a failure on all of
+them. [@Indie-Siggi](https://github.com/Indie-Siggi) reported #155 and #156
+and fixed both. #159 and #160 were found reviewing the second fix. #154, from
+the same report, is still open: the watcher follows links out of an indexed
+root, and nothing here changes that.
+
 ### Fixed - a directory the watcher can't read under one root stopped the watch of every root (#155)
 
 Reported and fixed by [@Indie-Siggi](https://github.com/Indie-Siggi) (#157).

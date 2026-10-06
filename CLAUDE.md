@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.145.0 |
+**Version:** 1.145.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -10,9 +10,8 @@ into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
 
-## Unreleased (after 1.145.0) — the watcher: #155 / #156 / #159 / #160
+## v1.145.1 — the watcher: one root's failure was every root's (#155 / #156 / #159 / #160)
 
-⚠ **Fold this into the next dated section at the bump; it is not a release.**
 @Indie-Siggi reported #154 / #155 / #156 already split, and fixed #155 (#157,
 `ignore_permission_denied=True`) and #156 (#158, backoff after an `awatch`
 error). Both merged 2026-10-06. ⚠ **#154 is still open**: the watcher follows
@@ -159,61 +158,7 @@ the serializer line and 5 fail. No tool, schema or INDEX_VERSION change; an inde
 written before this reads back as `{}`. All 12 CI jobs green on `b696111` before
 the merge.
 
-## v1.143.0 — `init` asks once about semantic search; the default install was words-only
-
-**A default install has no embedding provider, `init` never mentioned one, and
-`use_embeddings="auto"` then resolves to word matching.** Measured on the public
-benchmark (`github.com/jgravelle/jdoc-rerank-bench`, 492 questions, 6 doc sets):
-hybrid over lexical is +0.120 [+0.097, +0.144] nDCG@5, a direct answer in the top
-5 for 47% of questions against 34%. That was the largest effect in the rerank
-study and it was already ours. See "Rerank POC ruling" below.
-
-`init` now runs `cli/embeddings_offer.py` before its index step. Provider
-resolves: say which, embed. None: ask once, **default No**. On a yes it prints
-and runs `python -m pip install "fastembed>=0.8.0"` in its own interpreter,
-downloads the model through `_FastEmbedProvider()` so the file lands where the
-server looks, and indexes with embeddings. New flag `--with-embeddings`.
-
-⚠⚠ **`--yes` does NOT opt in, and that is the design, not an omission.** A flag
-that pre-approves config edits must not also pre-approve a ~250 MB download.
-`test_yes_flag_does_not_opt_in` was proven non-vacuous with `or yes` put back.
-⚠⚠ **This is the ONE place jdocmunch runs pip or starts a download for the
-user**, and a ratchet fails if any other module under `src/` names pip. The
-server itself still never installs or downloads unasked. README "Background
-behavior, fully disclosed" carries it, and a test binds the README to the
-numbers the prompt quotes.
-
-⚠ **After a failed model download the index step gets `use_embeddings=False`,
-not `"auto"`.** fastembed is installed by then, so `"auto"` would retry the
-download silently inside the index. ⚠ The quoted figures (34 / 47 / 492 / 6 /
-160 MB / 87 MB) are constants that the test RESTATES rather than imports.
-⚠ `fastembed` stays an optional extra (jjg, 2026-09-19).
-
-`doc_list_repos` rows gain `has_embeddings` (sidecar presence, index not
-opened) and `_meta.embeddings_tip`; measured 4,120 to 4,505 bytes on 8 indexes.
-The lexical `_meta.tip` now names the install step first.
-
-⚠ **Verified by a REAL run, not only the recorder tests**: throwaway venv,
-isolated home / store / model cache, exit 0 in 119 s, `search_mode: hybrid`,
-torch not loaded. ⚠ Two pre-existing quirks seen there and NOT fixed here:
-stdin from `/dev/null` reads as a TTY on Windows (prompts EOF to "no"), and with
-`DOC_INDEX_PATH` set the embeddings sidecar is written to the store AND to
-`~/.doc-index` (the second one was FIXED as #146, 2026-09-24: every root now
-resolves through `storage/paths.py`). ⚠ Follow-up, not shipped: fastembed's default model cache is
-`<tempdir>/fastembed_cache`, which an OS cleanup can empty.
-
-⚠ I lost uncommitted `init.py` edits by reverting a mutation check with
-`git checkout -- <file>`. **Commit a checkpoint before mutating a file you have
-uncommitted work in**, or mutate a copy.
-
-`tests/test_init_embeddings_offer.py` (17). No tool, schema or INDEX_VERSION
-change. Squash `f732e92`; all 12 CI jobs green on that SHA before the bump.
-⚠ **Released from `31def2a`, not the bump commit `45dd13e`**: a docs commit
-(ROADMAP's rerank / Jev entry) followed the bump, and `ROADMAP.md` and
-`CHANGELOG.md` ship in the sdist, so the artifacts were REBUILT and CI re-read
-on the new SHA before upload. A docs-only commit after a build still stales it.
-
-## Lessons from rotated entries (v1.116.0–v1.142.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24)
+## Lessons from rotated entries (v1.116.0–v1.143.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -222,6 +167,10 @@ entry that earned no reusable rule got no line.
 
 **Releasing**
 
+- ⚠⚠ **A docs-only commit after a build still stales the artifacts.**
+  `ROADMAP.md` and `CHANGELOG.md` ship in the sdist, so 1.143.0 was rebuilt
+  and CI re-read on the later SHA before upload. Release from the SHA the
+  artifacts were built at, and build last. (v1.143.0)
 - ⚠⚠ **An unbounded list field on 1.x cannot be capped later, so the cap
   and its `*_total` / `*_truncated` keys arrive WITH the field.** Measure
   the response in bytes on a real repo and read the sibling keys: #132's
@@ -247,6 +196,18 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **A flag that pre-approves config edits must not also pre-approve a
+  download.** `init --yes` does NOT opt in to the ~250 MB embeddings install;
+  `--with-embeddings` does. `cli/embeddings_offer.py` is the ONE module that
+  runs pip or starts a download, and a ratchet fails if another module under
+  `src/` names pip. (v1.143.0)
+- ⚠ **After a step fails, pass the next step the explicit OFF value, not
+  `"auto"`.** With fastembed installed and its model download failed,
+  `"auto"` would retry the download silently inside the index step.
+  (v1.143.0)
+- ⚠ **Commit a checkpoint before mutating a file you have uncommitted work
+  in.** A mutation check reverted with `git checkout -- <file>` took
+  uncommitted `init.py` edits with it. Or mutate a copy. (v1.143.0)
 - ⚠⚠ **A two-channel verdict reported over one channel is a different defect
   from a wrong score**, and the tool's own diff output (`body_unique_a: []` on
   both sides) was the tell it could not read. ⚠ An "all pairs were title_only"
@@ -356,6 +317,11 @@ entry that earned no reusable rule got no line.
 
 **Testing and measurement**
 
+- ⚠ **Verify an install flow by a REAL run, not only recorder tests.**
+  1.143.0's was a throwaway venv with isolated home, store and model cache.
+  ⚠ Seen there and NOT fixed: stdin from `/dev/null` reads as a TTY on
+  Windows, and fastembed's default model cache is `<tempdir>/fastembed_cache`,
+  which an OS cleanup can empty. (v1.143.0)
 - ⚠⚠ **Adding a second member to an auto-detect chain invalidates every test
   that pinned the first one.** Installing fastembed turned FIVE existing tests
   red; they stubbed one provider probe and read the developer's site-packages
@@ -1040,7 +1006,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.142.0 rotated there 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.143.0 rotated there 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
