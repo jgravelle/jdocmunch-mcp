@@ -412,6 +412,10 @@ async def watch_docs(
                 debounce=debounce_ms,
                 stop_event=cycle_stop,
                 poll_delay_ms=poll_delay,
+                # Every root shares this one watcher: without this, one
+                # directory it cannot read under ANY root ends the watch of
+                # every repo.
+                ignore_permission_denied=True,
             ):
                 await _handle_changes(
                     changes, roots_map, storage_path,
