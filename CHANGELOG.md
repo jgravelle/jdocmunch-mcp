@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Fixed - `**/` in `path_glob` required at least one directory (#163)
+
+Reported and fixed by [@vishalhabib99](https://github.com/vishalhabib99).
+`path_glob` went through plain `fnmatch`, which reads `**` as `*`, so the `/`
+after it still had to be there. The tool schemas' own example, `api/**/*.md`,
+missed `api/auth.md`, and `**/*.md` missed every document at the root. From
+`search_sections` the empty answer also carried `absence_evidence`, so it
+read as "nothing here" when the filter was mis-scoped.
+
+A `**/` that is a whole path segment now also matches zero directories, in
+`get_toc`, `get_toc_tree`, `count_sections`, and the shared pre-filter behind
+`search_sections` and `find_code_examples`.
+
+**What changes for a caller.** A glob containing `**/` can return documents it
+used to skip: the direct children, and root files for a leading `**/`. No glob
+returns fewer. The plain `fnmatch` result is tried first and decides alone
+when it matches, and a test checks that over 8,000 generated cases. A glob
+with no `**/` behaves exactly as before, `*` still crosses `/`, and no key,
+field or tool changed.
+
+Their first form tried every combination of kept and dropped `**/`. Review
+replaced the inside of the helper before release, for three reasons:
+
+- That is 2^n `fnmatch` calls per section. 16 globstars measured 173 ms for a
+  single path that didn't match. It now walks segment boundaries, bounded by
+  pieces x boundaries squared; the same input takes under 1 ms.
+- Any `**/` could be dropped, so `api**/*.md` began to match `apix.md`. Only
+  a `**/` that is a whole segment counts now.
+- A glob with no `**/` that didn't match paid for a second, identical
+  `fnmatch`. It's one match again.
+
+`tests/test_path_glob_globstar.py` (15, theirs) and
+`tests/test_path_glob_bounds.py` (10). Ours counts regex calls against the
+bound, with no timing in it, and checks the walk against their combination
+form as the oracle.
+
 ## [1.145.2] - 2026-10-06 - the watcher walked through directory symlinks out of an indexed root
 
 ### Fixed - the watcher walked through directory symlinks out of an indexed root (#154)

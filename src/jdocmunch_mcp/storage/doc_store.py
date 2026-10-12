@@ -4,7 +4,6 @@ import fnmatch
 import functools
 import inspect
 import hashlib
-import itertools
 import json
 import os
 import re
@@ -315,23 +314,74 @@ def _load_sidecar_vectors(sidecar_path: str) -> dict:
     return out
 
 
+_PATH_SEP = os.path.normcase("/")
+_GLOBSTAR_SEGMENT = re.compile(
+    r"(?:^|(?<={sep}))\*\*{sep}".format(sep=re.escape(_PATH_SEP)))
+
+
+@functools.lru_cache(maxsize=256)
+def _compile_path_glob(path_glob: str):
+    """Return ``(whole, pieces)`` for a normcased glob.
+
+    ``whole`` is the regex ``fnmatch.fnmatch`` itself would use. ``pieces`` is
+    the glob split at each ``**/`` that is a whole path segment, one regex per
+    piece, or None when there is no such segment.
+    """
+    whole = re.compile(fnmatch.translate(path_glob))
+    parts = _GLOBSTAR_SEGMENT.split(path_glob)
+    if len(parts) == 1:
+        return whole, None
+    return whole, tuple(re.compile(fnmatch.translate(part)) for part in parts)
+
+
+@functools.lru_cache(maxsize=8192)
+def _path_glob_matches(doc_path: str, path_glob: str) -> bool:
+    whole, pieces = _compile_path_glob(path_glob)
+    if whole.match(doc_path):
+        return True  # everything that matched before #163 still matches
+    if pieces is None:
+        return False
+    # Each piece but the last is empty or ends in a separator, so it can only
+    # end where a path segment starts. Walk those boundaries piece by piece.
+    end = len(doc_path)
+    bounds = [0] + [i + 1 for i, ch in enumerate(doc_path) if ch == _PATH_SEP]
+    starts = [0]
+    for piece in pieces[:-1]:
+        first_end = None
+        for stop in bounds:
+            if any(start <= stop and piece.match(doc_path, start, stop) for start in starts):
+                first_end = stop
+                break
+        if first_end is None:
+            return False
+        # `**/` then stays put or skips to any later segment start.
+        starts = [b for b in bounds if b >= first_end]
+    last = pieces[-1]
+    return any(last.match(doc_path, start, end) for start in starts)
+
+
 def path_glob_matches(doc_path: str, path_glob: str) -> bool:
     """``fnmatch`` a doc_path against ``path_glob``, letting each ``**/`` also
     match zero directories.
 
     Plain ``fnmatch`` treats ``**`` like ``*``, so the ``/`` after it is still
     required: ``api/**/*.md`` missed ``api/auth.md`` and ``**/*.md`` missed
-    every root-level document. The pattern is tried as written and with each
-    ``**/`` dropped, in every combination. ``*`` still crosses ``/`` as before.
+    every root-level document. ``*`` still crosses ``/`` as before, and case
+    is folded exactly as ``fnmatch.fnmatch`` folds it (``os.path.normcase``).
+
+    ⚠ The plain match is tried first and decides alone when it succeeds, so
+    this can only ever ADD paths to what matched before.
+
+    ⚠ The zero-directory half walks segment boundaries, at most
+    (pieces x boundaries squared) regex calls. Trying every combination of
+    kept and dropped ``**/`` is 2**n ``fnmatch`` calls per section (16
+    globstars: 173 ms for one path), and one regex with an optional group
+    per ``**/`` backtracks worse (8 of them on a 20-deep path: 2.3 s).
+
+    ⚠ Only a ``**/`` that is a whole segment counts. ``api**/x.md`` is left to
+    plain ``fnmatch``; dropping that ``**/`` would make it match ``apix.md``.
     """
-    if fnmatch.fnmatch(doc_path, path_glob):
-        return True
-    parts = path_glob.split("**/")
-    for keep in itertools.product(("**/", ""), repeat=len(parts) - 1):
-        candidate = parts[0] + "".join(sep + part for sep, part in zip(keep, parts[1:]))
-        if fnmatch.fnmatch(doc_path, candidate):
-            return True
-    return False
+    return _path_glob_matches(os.path.normcase(doc_path), os.path.normcase(path_glob))
 
 
 @dataclass
