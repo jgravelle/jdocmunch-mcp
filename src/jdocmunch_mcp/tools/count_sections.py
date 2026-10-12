@@ -12,11 +12,11 @@ all per-result enrichment. Returns just the count.
 
 from __future__ import annotations
 
-import fnmatch
 import time
 from typing import Optional
 
 from ..storage import DocStore
+from ..storage.doc_store import path_glob_matches
 
 
 def count_sections(
@@ -63,7 +63,7 @@ def count_sections(
         dp = sec.get("doc_path") or ""
         if doc_path is not None and dp != doc_path:
             continue
-        if path_glob and not fnmatch.fnmatch(dp, path_glob):
+        if path_glob and not path_glob_matches(dp, path_glob):
             continue
         # Level filter.
         lvl = sec.get("level")

@@ -4,6 +4,7 @@ import time
 from typing import Optional
 
 from ..storage import DocStore
+from ..storage.doc_store import path_glob_matches
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
 
 
@@ -22,7 +23,6 @@ def get_toc(
             matches the fnmatch glob (e.g. ``"api/**/*.md"``,
             ``"reference/*"``). Default None means no filter.
     """
-    import fnmatch
     t0 = time.perf_counter()
     store = DocStore(base_path=storage_path)
     owner, name = store._resolve_repo(repo)
@@ -36,7 +36,7 @@ def get_toc(
         key=lambda s: (s.get("doc_path", ""), s.get("byte_start", 0))
     )
     if path_glob:
-        sections = [s for s in sections if fnmatch.fnmatch(s.get("doc_path", ""), path_glob)]
+        sections = [s for s in sections if path_glob_matches(s.get("doc_path", ""), path_glob)]
 
     toc = []
     for sec in sections:

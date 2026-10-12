@@ -4,6 +4,7 @@ import fnmatch
 import functools
 import inspect
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -314,6 +315,25 @@ def _load_sidecar_vectors(sidecar_path: str) -> dict:
     return out
 
 
+def path_glob_matches(doc_path: str, path_glob: str) -> bool:
+    """``fnmatch`` a doc_path against ``path_glob``, letting each ``**/`` also
+    match zero directories.
+
+    Plain ``fnmatch`` treats ``**`` like ``*``, so the ``/`` after it is still
+    required: ``api/**/*.md`` missed ``api/auth.md`` and ``**/*.md`` missed
+    every root-level document. The pattern is tried as written and with each
+    ``**/`` dropped, in every combination. ``*`` still crosses ``/`` as before.
+    """
+    if fnmatch.fnmatch(doc_path, path_glob):
+        return True
+    parts = path_glob.split("**/")
+    for keep in itertools.product(("**/", ""), repeat=len(parts) - 1):
+        candidate = parts[0] + "".join(sep + part for sep, part in zip(keep, parts[1:]))
+        if fnmatch.fnmatch(doc_path, candidate):
+            return True
+    return False
+
+
 @dataclass
 class DocIndex:
     """Index for a repository's documentation."""
@@ -493,7 +513,7 @@ class DocIndex:
         sec_path = sec.get("doc_path", "")
         if doc_path and sec_path != doc_path:
             return True
-        if path_glob and not fnmatch.fnmatch(sec_path, path_glob):
+        if path_glob and not path_glob_matches(sec_path, path_glob):
             return True
         return False
 
