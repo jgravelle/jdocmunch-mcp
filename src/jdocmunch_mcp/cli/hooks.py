@@ -286,7 +286,10 @@ def run_posttooluse() -> int:
     # a non-zero hook exit puts the traceback's first line in the transcript.
     tool_input = data.get("tool_input") if isinstance(data, dict) else None
     file_path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
-    if not isinstance(file_path, str) or not file_path:
+    # A NUL names no file on any platform. It must be refused here rather than
+    # left to ``resolve()``: that raises on POSIX and on Windows up to 3.12, but
+    # Windows 3.13 returns the path with the NUL in it and the worker is spawned.
+    if not isinstance(file_path, str) or not file_path or "\x00" in file_path:
         return 0
 
     _, ext = os.path.splitext(file_path)
