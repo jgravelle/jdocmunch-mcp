@@ -132,7 +132,7 @@ def test_version_flag_still_works():
 # than the work: `verify_package_integrity()` (which calls
 # `packages_distributions()` over every installed distribution and caches
 # nothing), `importlib.metadata` for a `__version__` the hook never reads, and
-# the argparse tree.
+# the argparse tree. `benchmarks/hook_path/measure.py` measures them.
 #
 # These are ratchets on the SHAPE that makes that saving possible, like the
 # ones above. A timing assertion would be flaky and would not say what broke.

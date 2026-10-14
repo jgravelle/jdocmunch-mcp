@@ -1,0 +1,99 @@
+{
+  "measured_at": "2026-10-14T17:58:18+00:00",
+  "checkout": {
+    "sha": "3a695422da8c36a60b68f13f8920d953ec40ca27",
+    "state": "clean",
+    "src_tree": "fcefafd543f792666d1a6d4a0520aace4f6608a2",
+    "version": "1.145.5",
+    "version_source": "pyproject.toml"
+  },
+  "baseline": {
+    "sha": "91e24a81cfe73d9efe6974339ba3601d372e9a81",
+    "state": "clean",
+    "src_tree": "c787e7cfe67042b9ecb85299eafe31bde8bced07",
+    "version": "1.145.5",
+    "version_source": "pyproject.toml"
+  },
+  "corpus": "jdocmunch-mcp v1.145.3 (git archive)",
+  "sections": 14588,
+  "target_file": "CHANGELOG.md",
+  "target_bytes": 273907,
+  "python": "3.12.13",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "runs_per_arm": 15,
+  "arms": {
+    "interpreter": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 38.7,
+      "min_ms": 35.2,
+      "max_ms": 82.7,
+      "stdout_bytes": [
+        0
+      ]
+    },
+    "hook_before": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 987.7,
+      "min_ms": 931.2,
+      "max_ms": 1037.2,
+      "stdout_bytes": [
+        240
+      ]
+    },
+    "hook_after": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 69.1,
+      "min_ms": 64.4,
+      "max_ms": 74.8,
+      "stdout_bytes": [
+        358
+      ]
+    },
+    "hook_after_touched": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 68.1,
+      "min_ms": 63.7,
+      "max_ms": 80.4,
+      "stdout_bytes": [
+        358
+      ]
+    },
+    "import_server_before": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 686.7,
+      "min_ms": 658.8,
+      "max_ms": 708.2,
+      "stdout_bytes": []
+    },
+    "import_server_after": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 691.9,
+      "min_ms": 643.8,
+      "max_ms": 713.3,
+      "stdout_bytes": []
+    },
+    "import_cli_main_after": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 9.2,
+      "min_ms": 8.7,
+      "max_ms": 10.8,
+      "stdout_bytes": []
+    },
+    "integrity_check_after": {
+      "runs": 15,
+      "failed": 0,
+      "median_ms": 226.5,
+      "min_ms": 214.2,
+      "max_ms": 232.3,
+      "stdout_bytes": []
+    }
+  },
+  "note": "Each run is a fresh process; arms are interleaved per round. hook_* are wall time of `python -m jdocmunch_mcp hook-pretooluse` including interpreter start; import_* and integrity_check_* are in-process times inside a fresh interpreter."
+}

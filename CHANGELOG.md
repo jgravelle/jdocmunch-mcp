@@ -98,6 +98,19 @@ argparse tree.
 
 `main()` now dispatches a bare `hook-pretooluse` before any of them.
 
+Measured with `benchmarks/hook_path/measure.py`: 15 fresh processes per arm,
+interleaved, 0 failed runs, Windows, Python 3.12, on this repository at v1.145.3
+(14,588 sections). The record is `benchmarks/hook_path/results.json`, which
+names the commit and the `src/` tree it timed and the baseline it timed against
+(91e24a8, v1.145.5). The arm is named for each figure, and all are medians.
+`python -m jdocmunch_mcp hook-pretooluse` against a real index, reading a real
+indexed file: **987.7 ms** on the baseline (`hook_before`), **69.1 ms** with this
+change (`hook_after`), on a floor of 38.7 ms for an interpreter that does
+nothing (`interpreter`). One `verify_package_integrity()` call alone is 226.5 ms
+(`integrity_check_after`). ⚠ The two hook runs do not print the same hint: the
+baseline's hook knew nothing of the index and printed a shorter line (240 bytes
+against 358), so the comparison is of the whole hook, not of one function.
+
 ⚠⚠ **The argparse tree was the SMALL half, and that inverts the premise this
 started from.** On its own it would not have justified a second dispatch path.
 
@@ -147,7 +160,11 @@ new branch broke while the branch itself called it on its first line.
 `pyproject`'s `jdocmunch-mcp` entry point moved from `jdocmunch_mcp.server:main`
 to `jdocmunch_mcp.cli.main:main`. The argparse tree now lives in a module whose
 module-level imports are stdlib only, so `serve` is the one branch that reaches
-`..server` and with it the SDK.
+`..server` and with it the SDK. In the same record, `import jdocmunch_mcp.server`
+takes 686.7 ms on the baseline (`import_server_before`) and 691.9 ms on this
+checkout (`import_server_after`) -- unchanged, because `serve` still pays for the
+SDK -- while `import jdocmunch_mcp.cli.main` takes 9.2 ms on this checkout
+(`import_cli_main_after`).
 
 `src/jdocmunch_mcp/__main__.py` dispatches through `cli.main:main` too. It
 imported `.server` before, so `python -m jdocmunch_mcp` -- the command the
@@ -261,7 +278,9 @@ source of a different SIZE is compared whatever its mtime, because a changed
 file can arrive with an older or preserved mtime (`cp -p`, `rsync -t`, a tar
 extract). Only a source whose bytes differ from the mirror is `stale`. ⚠ The
 bound that remains: an edit that keeps both the size and an older-or-equal mtime
-is not seen.
+is not seen. With a 273,907-byte file touched forward so the content comparison
+runs, the whole hook takes 68.1 ms (`hook_after_touched`) against 69.1 ms for the
+same file untouched (`hook_after`), in the harness described above.
 
 ⚠ **Some formats are mirrored as PREPROCESSED text**, not verbatim: `.mdx`,
 `.ipynb`, `.html`/`.htm`, `.xml`/`.svg`/`.xhtml`, `.tscn`/`.tres`, `.jsonc` and
