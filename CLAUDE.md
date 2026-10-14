@@ -10,6 +10,23 @@ into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
 
+## Unreleased (after 1.145.3) — #165 / #166: corpus rules on the two refresh paths
+
+⚠ **Fold this into the next dated section at the bump; it is not a release.**
+@randyhbh reported both. The watcher's `_corpus_filters` got discovery's
+`local/<name>` handle, so the stored patterns loaded as nothing (#165). The
+PostToolUse hook re-indexed any doc-extension file (#166); `index_file` now
+takes `apply_corpus_rules`, and only the hook passes True.
+
+⚠⚠ **A test that builds its own input skips the producer that broke.** The
+#115 tests handed `_handle_changes` the bare name. Discovery never produces
+it, so they stayed green while the stored-pattern half never ran for a
+real watcher.
+Feed a consumer from its real producer.
+
+⚠ **`index-file <path>` keeps the explicit-path bypass on purpose**, the
+#115 split. A person naming a file gets it; an edit event is not that.
+
 ## v1.145.3 — #163: `**/` in `path_glob` matches zero directories
 
 @vishalhabib99 reported and fixed it: `path_glob` was plain `fnmatch`, so the

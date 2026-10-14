@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Fixed - two refresh paths re-admitted files the corpus rules exclude (#165, #166)
+
+Reported by [@randyhbh](https://github.com/randyhbh), with a repro for each
+path. An index built with `--extra-ignore-pattern` stores the patterns
+(`corpus_shape_patterns`, #116), and #115 says a refresh must not reinstate a
+file the corpus excludes. Two refreshes did.
+
+- **The watcher (#165).** Discovery names a repo `local/<name>`, and the
+  watcher passed that handle straight to the index lookup, which then
+  searched for `local/local/<name>` and found nothing. The `.gitignore` still
+  applied; the stored patterns never did. The #115 tests had passed the bare
+  name, so none of them fed the watcher the name discovery produces. The new
+  tests build it from discovery.
+- **The PostToolUse edit hook (#166).** It checked only the file extension,
+  so an agent's edit of an excluded file added it. The hook now skips a file
+  the owning index's `.gitignore` or stored patterns exclude, and
+  `index_file` reports that as `skipped: true` with
+  `reason: "excluded_by_corpus_rules"`, not as an error.
+
+`jdocmunch-mcp index-file <path>` is unchanged: a person naming a file still
+gets it indexed, the same explicit-path bypass `index_local(paths=...)`
+documents. A file one of these paths already admitted stays until the next
+full `index-local`, which drops it.
+
 ## [1.145.3] - 2026-10-12 - `**/` in `path_glob` required at least one directory
 
 ### Fixed - `**/` in `path_glob` required at least one directory (#163)

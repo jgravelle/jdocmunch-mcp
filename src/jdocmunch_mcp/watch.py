@@ -307,8 +307,13 @@ def _corpus_filters(root: str, name: str, storage_path: str):
     try:
         import pathspec
         from .storage.doc_store import DocStore
+        from .tools.index_local import normalize_local_index_name
 
-        idx = DocStore(base_path=storage_path).load_index("local", name)
+        # jdoc#165: discovery hands over the durable handle ``local/<name>``,
+        # and load_index("local", "local/<name>") found nothing, so the stored
+        # patterns were silently skipped on every watcher refresh.
+        bare = normalize_local_index_name(name, name)
+        idx = DocStore(base_path=storage_path).load_index("local", bare)
         patterns = list(getattr(idx, "corpus_shape_patterns", None) or []) if idx else []
         if patterns:
             extra_spec = pathspec.PathSpec.from_lines("gitignore", patterns)

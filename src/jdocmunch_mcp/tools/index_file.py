@@ -122,11 +122,20 @@ def index_file(
     storage_path: Optional[str] = None,
     use_ai_summaries: bool = True,
     name: Optional[str] = None,
+    apply_corpus_rules: bool = False,
 ) -> dict:
     """Re-index a single file within an existing index.
 
     Finds which index owns the file (or uses ``name`` when given), re-parses
     it, and updates the index in place using incremental_save.
+
+    ``apply_corpus_rules`` (jdoc#165): skip a file the owning index's corpus
+    excludes, by its root's ``.gitignore`` and its stored
+    ``corpus_shape_patterns``. The PostToolUse hook passes True: it names a
+    file because an agent edited it, not because anyone asked for it to be
+    indexed, which is the watcher's position in jdoc#115. A caller naming the
+    file itself (``index-file <path>``) keeps the explicit-path bypass that
+    ``index_local(paths=...)`` documents.
 
     Returns dict with results.
     """
@@ -163,6 +172,22 @@ def index_file(
 
     owner, name, rel_path, detected_root = match
     repo_id = f"{owner}/{name}"
+
+    if apply_corpus_rules and owner == "local":
+        from ..watch import _corpus_filters, _excluded_from_corpus
+
+        gitignore_spec, extra_spec = _corpus_filters(
+            str(detected_root), name, str(store.base_path)
+        )
+        if _excluded_from_corpus(str(path), str(detected_root), gitignore_spec, extra_spec):
+            return {
+                "success": True,
+                "skipped": True,
+                "reason": "excluded_by_corpus_rules",
+                "repo": repo_id,
+                "file": rel_path,
+                "exit_code": 0,
+            }
 
     # Read and parse the file
     try:
@@ -283,6 +308,8 @@ def index_file(
     return result
 
 
-def index_file_cli(file_path: str, name: Optional[str] = None) -> dict:
+def index_file_cli(
+    file_path: str, name: Optional[str] = None, apply_corpus_rules: bool = False
+) -> dict:
     """CLI entry point for index-file subcommand."""
-    return index_file(file_path, name=name)
+    return index_file(file_path, name=name, apply_corpus_rules=apply_corpus_rules)

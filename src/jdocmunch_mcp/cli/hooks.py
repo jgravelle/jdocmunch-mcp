@@ -197,7 +197,8 @@ def run_hook_reindex(path: str) -> int:
     try:
         _breadcrumb(f"reindex start {resolved}")
         from ..tools.index_file import index_file_cli
-        index_file_cli(resolved)
+        # jdoc#165: an edit is not a request to index; the corpus rules apply.
+        index_file_cli(resolved, apply_corpus_rules=True)
         _breadcrumb(f"reindex done {resolved}")
     except Exception as exc:  # noqa: BLE001 - background best-effort
         _breadcrumb(f"reindex error {resolved}: {exc}")
