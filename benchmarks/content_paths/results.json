@@ -1,0 +1,27 @@
+{
+  "measured_at": "2026-10-14T14:58:41+00:00",
+  "corpus": "jdocmunch-mcp v1.145.3 (git archive)",
+  "sections": 14588,
+  "query": "install configuration",
+  "python": "3.12.13",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "cold_search": {
+    "runs": 5,
+    "failed": 0,
+    "median_ms": 1440.0,
+    "median_check_ms": 102.9,
+    "checks": [
+      529
+    ]
+  },
+  "cold_search_baseline": {
+    "runs": 5,
+    "failed": 0,
+    "median_ms": 4005.8,
+    "median_check_ms": 2623.5,
+    "checks": [
+      14465
+    ]
+  },
+  "baseline_src_note": "the same searches against the index above, importing the base commit's package"
+}

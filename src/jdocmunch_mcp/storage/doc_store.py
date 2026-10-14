@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -1071,7 +1072,10 @@ class DocStore:
         (``content_dir.resolve()``, computed once) so the root is not resolved
         again on every call. ⚠ The CANDIDATE is still resolved every time: that
         is the escape guard, since a symlink inside the content dir can point
-        outside it and only resolving the candidate catches it.
+        outside it and only resolving the candidate catches it. (v1.146.0: a
+        posting-index build calls this once per document rather than once per
+        section, and keeps the answers only for that build; see the loader in
+        ``load_index``.)
         """
         try:
             base = resolved_root if resolved_root is not None else content_dir.resolve()
@@ -1477,10 +1481,59 @@ class DocStore:
         except (OSError, ValueError):
             resolved_root = None
 
+        # v1.146.0: a pass that reads every section -- the posting-index build
+        # on a cold search -- resolved the same few documents once per
+        # SECTION. `_loader.sweep()` lets one such pass reuse its own
+        # containment verdicts, one per document.
+        #
+        # ⚠⚠ THE MEMO LIVES FOR ONE SWEEP AND NOT ONE CALL LONGER, and that
+        # lifetime is the security argument. This loader is long-lived: the
+        # index it belongs to sits in the process-wide `_INDEX_CACHE` and is
+        # handed to every later tool call. A verdict kept on it would let a
+        # check taken before a symlink appeared in the content mirror
+        # authorise a read after it did. Outside a sweep every read resolves
+        # afresh.
+        #
+        # ⚠ Inside a sweep the window is WIDER than resolving per call: one
+        # verdict covers every later read of that document in the same build,
+        # not one open. A file swapped for a symlink mid-build can therefore
+        # feed its target's terms into the posting index for the rest of the
+        # build. What it can reach is posting-term membership, never text
+        # returned to a caller, and only until the build ends. A refusal is
+        # kept the same way, so a document already escaping when the build
+        # starts is refused for every one of its sections.
+        #
+        # The build is synchronous and `_sweep` ends it in a `finally`, which
+        # is what keeps one tool call's verdicts from another's reads on the
+        # event-loop thread. The memo is also thread-local, so `index_local`,
+        # which runs on a worker thread, never shares one.
+        _sweep_state = threading.local()
+
+        def _resolve(doc_path: str) -> Optional[Path]:
+            memo = getattr(_sweep_state, "memo", None)
+            if memo is None:
+                return self._safe_content_path(content_dir, doc_path, resolved_root)
+            if doc_path not in memo:
+                memo[doc_path] = self._safe_content_path(
+                    content_dir, doc_path, resolved_root
+                )
+            return memo[doc_path]
+
+        @contextmanager
+        def _sweep():
+            if getattr(_sweep_state, "memo", None) is not None:
+                yield  # nested: the outer sweep owns the memo
+                return
+            _sweep_state.memo = {}
+            try:
+                yield
+            finally:
+                _sweep_state.memo = None
+
         def _loader(doc_path: str, byte_start: int, byte_end: int) -> str:
             if not doc_path or byte_end <= byte_start:
                 return ""
-            file_path = self._safe_content_path(content_dir, doc_path, resolved_root)
+            file_path = _resolve(doc_path)
             if not file_path:
                 return ""
             # No exists() probe: open() below raises OSError for a missing
@@ -1493,6 +1546,7 @@ class DocStore:
             except OSError:
                 return ""
 
+        _loader.sweep = _sweep
         index._content_loader = _loader
         # jdoc#75: point the index at its embeddings sidecar so vectors can
         # rehydrate lazily on first semantic use (see _rehydrate_embeddings).

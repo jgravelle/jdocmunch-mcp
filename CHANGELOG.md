@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Changed - a cold search checks each document's path once, not once per section
+
+The first `search_sections` in a process builds the posting index by reading
+every section body back from the content mirror. Each read went through
+`_safe_content_path`, which resolves the path to make sure it stays inside the
+mirror, so a document with 50 sections was resolved 50 times.
+
+Measured with `benchmarks/content_paths/measure.py` on this repository at
+v1.145.3 (`git archive`, 14,588 sections), Windows, Python 3.12. Each figure
+is the median of 5 fresh processes, both sides searching the same index, with
+0 failed runs; the record is `benchmarks/content_paths/results.json`.
+
+    first search, before             4,006 ms   14,465 path checks   2,624 ms in them
+    first search, after              1,440 ms      529 path checks     103 ms in them
+
+The harness wraps the check with a counter, which adds the same small cost to
+every call on both sides.
+
+⚠⚠ **The reuse lasts for one posting-index build and not one call longer.**
+The loader belongs to an index that stays in the process-wide index cache and
+is handed to every later tool call. If it kept its answers, a check made
+before a symlink appeared in the content mirror would approve a read after
+it did. So `PostingIndex.build` opens a scope on the loader, each document is
+checked once inside it, and the answers are dropped when the build ends,
+including when it raises. Every other read resolves afresh, as before. The
+build is synchronous, which is what keeps one tool call's answers from
+another's reads; the answers are also per thread, so `index_local` on its
+worker thread never shares them.
+
+⚠ Inside a build the window is wider than before: one answer covers every
+later read of that document in the same build, not one open. A file swapped
+for a symlink mid-build can add its target's terms to the posting index until
+the build ends; it cannot put text in a response. Refusals are kept the same
+way, so a document that already escapes is refused for all its sections.
+
+Two tests use real symlinks. One swaps a mirrored file after a cold search
+and reads it through the cached index: refused. The other builds over a
+mirror that already holds an escaping document: none of its target's terms
+are indexed.
+
+No tool, key or behaviour change for a caller. `tests/test_content_sweep_scope.py` (9).
+
 ## [1.145.4] - 2026-10-14 - two refresh paths re-admitted files the corpus rules exclude
 
 ### Fixed - two refresh paths re-admitted files the corpus rules exclude (#165, #166)
