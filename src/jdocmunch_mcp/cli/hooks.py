@@ -17,6 +17,11 @@ while there stays exactly one definition of each.
 that use them, all of which belong to the PostToolUse reindex machinery. A
 ``Read`` must not pay for the reindexer. Keep new module-level imports out of
 this file for the same reason ``cli/main.py`` keeps them out of its own.
+
+⚠ EVERY ``run_*`` handler here is wrapped in ``_guarded`` (from ``_hook_probe``):
+a hook that raises exits non-zero, and the transcript then shows the first line
+of the traceback. ``tests/test_hook_payload_shapes.py`` enumerates the handlers,
+so a new one cannot be added unguarded.
 """
 
 import json
@@ -31,6 +36,7 @@ from ._hook_probe import (  # noqa: F401
     _DOC_EXTENSIONS,
     _MIN_SIZE_BYTES,
     _emit_additional_context,
+    _guarded,
     run_pretooluse,
 )
 
@@ -182,6 +188,7 @@ def _release_reindex_slot(fd) -> None:
             pass
 
 
+@_guarded
 def run_hook_reindex(path: str) -> int:
     """`hook-reindex <path>` worker spawned by the PostToolUse hook (jdoc#76).
 
@@ -250,6 +257,7 @@ def _self_invocation() -> list:
     return [sys.executable, "-m", "jdocmunch_mcp"]
 
 
+@_guarded
 def run_posttooluse() -> int:
     """PostToolUse hook: auto-reindex doc files after Edit/Write.
 
@@ -271,8 +279,12 @@ def run_posttooluse() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
 
-    file_path: str = data.get("tool_input", {}).get("file_path", "")
-    if not file_path:
+    # Valid JSON is not a valid payload: ``tool_input`` as a string, a top-level
+    # null/list/number, or a non-string ``file_path`` all used to raise here, and
+    # a non-zero hook exit puts the traceback's first line in the transcript.
+    tool_input = data.get("tool_input") if isinstance(data, dict) else None
+    file_path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
+    if not isinstance(file_path, str) or not file_path:
         return 0
 
     _, ext = os.path.splitext(file_path)
@@ -328,6 +340,7 @@ def run_posttooluse() -> int:
     return 0
 
 
+@_guarded
 def run_precompact() -> int:
     """PreCompact hook: kept as a no-op for settings.json entries already installed.
 
@@ -360,6 +373,7 @@ _SESSIONSTART_SOURCES = {
 }
 
 
+@_guarded
 def run_sessionstart() -> int:
     """SessionStart hook: re-inject the doc session snapshot after compaction.
 

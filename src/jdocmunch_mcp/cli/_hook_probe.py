@@ -43,6 +43,59 @@ _DOC_EXTENSIONS: set[str] = {
 _MIN_SIZE_BYTES = int(os.environ.get("JDOCMUNCH_HOOK_MIN_SIZE", "2048"))
 
 
+def _breadcrumb(msg: str) -> None:
+    """Leave the opt-in ``JDOCMUNCH_HOOK_LOG`` breadcrumb ``cli/hooks.py`` writes.
+
+    The Read hook must not import the reindex machinery (``cli.hooks`` pulls in
+    ``storage.paths`` and ``pathlib`` the moment it writes anything), so the
+    environment switch is tested HERE with ``os`` alone and the real writer is
+    imported only when logging is on. With the switch off -- the default -- this
+    is one dict lookup and nothing is imported.
+    """
+    if os.environ.get("JDOCMUNCH_HOOK_LOG", "").strip().lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        return
+    try:
+        from .hooks import _breadcrumb as _write
+        _write(msg)
+    except Exception:
+        pass
+
+
+def _guarded(fn):
+    """Make a ``run_*`` hook handler unable to raise.
+
+    A hook's exit code is part of its contract: a non-zero exit is a
+    non-blocking error whose first line of stderr Claude Code shows in the
+    transcript, so a traceback from a handler reaches the user as
+    ``Traceback (most recent call last):``. Valid JSON is not a valid payload --
+    ``tool_input`` as a string, a top-level null/list/number and a numeric
+    ``file_path`` are all valid JSON -- so every handler wraps its whole body, not
+    only the ``json.load``. The failure is not silent: it is breadcrumbed.
+
+    Hand-rolled rather than ``functools.wraps`` because this module's import set
+    is ratcheted; ``__wrapped__`` is set so ``inspect.getsource`` still finds the
+    handler. ``_hook_guarded`` is what the ratchet in
+    ``tests/test_hook_payload_shapes.py`` looks for on every ``run_*`` function.
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            _breadcrumb(f"{fn.__name__} failed: {type(exc).__name__}: {exc}")
+            return 0
+
+    wrapper.__name__ = fn.__name__
+    wrapper.__qualname__ = fn.__qualname__
+    wrapper.__doc__ = fn.__doc__
+    wrapper.__module__ = fn.__module__
+    wrapper.__wrapped__ = fn
+    wrapper._hook_guarded = True
+    return wrapper
+
+
+@_guarded
 def run_pretooluse() -> int:
     """PreToolUse hook: intercept Read calls on large doc files.
 
@@ -58,15 +111,24 @@ def run_pretooluse() -> int:
 
     Small files, non-doc files, and unreadable paths are silently allowed.
 
-    Returns exit code (always 0 -- errors are swallowed to avoid blocking).
+    Returns exit code (always 0). ``_guarded`` swallows (and breadcrumbs)
+    anything unexpected so a malformed payload can never block a Read:
+    previously the try covered only ``json.load``, and five valid-JSON shapes
+    (``tool_input`` as a string, a top-level null/list/number, ``file_path`` as
+    a number) crashed with a traceback whose first line the transcript then
+    showed as a hook error.
     """
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0
 
-    file_path: str = data.get("tool_input", {}).get("file_path", "")
-    if not file_path:
+    tool_input = data.get("tool_input") if isinstance(data, dict) else None
+    if not isinstance(tool_input, dict):
+        return 0
+
+    file_path = tool_input.get("file_path")
+    if not isinstance(file_path, str) or not file_path:
         return 0
 
     _, ext = os.path.splitext(file_path)
@@ -82,7 +144,6 @@ def run_pretooluse() -> int:
         return 0
 
     # Targeted reads (offset/limit set) are likely pre-edit -- allow silently.
-    tool_input = data.get("tool_input", {})
     if tool_input.get("offset") is not None or tool_input.get("limit") is not None:
         return 0
 

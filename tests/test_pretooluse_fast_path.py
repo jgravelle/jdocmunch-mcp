@@ -5,8 +5,8 @@ tree and before `verify_package_integrity()`, because Claude Code fires that
 subcommand as a fresh process on every `Read` and the process does very little
 work. The saving is only legitimate if the two paths are observably the same,
 so this file compares them as real subprocesses -- exit code, stdout bytes and
-stderr bytes -- across the payload shapes `tests/test_hooks.py` pins that do not
-crash, plus the file-size and targeted-read conditions.
+stderr bytes -- across every payload shape `tests/test_hooks.py` pins, plus the
+file-size and targeted-read conditions.
 
 ⚠ The comparison is BYTES, not "contains search_sections". The hint text is
 what reaches the model, and a difference of one character is a changed hook.
@@ -77,6 +77,12 @@ _SHAPES = [
     json.dumps({"tool_input": {"file_path": "app.py"}}),
     json.dumps({"tool_input": {"file_path": "/nonexistent/doc.md"}}),
     json.dumps({"tool_input": {}}),
+    # The five valid-JSON shapes that crashed the handler before it was guarded.
+    json.dumps({"tool_input": "notadict"}),
+    json.dumps(None),
+    json.dumps([1, 2]),
+    json.dumps(42),
+    json.dumps({"tool_input": {"file_path": 123}}),
     "not json",
     "",
 ]

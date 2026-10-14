@@ -48,6 +48,20 @@ class TestPreToolUse:
         assert "jDocMunch hint" in _additional_context(captured.out)
         assert captured.err == ""
 
+    @pytest.mark.parametrize("payload", [
+        {"tool_input": "notadict"},
+        None,
+        [1, 2],
+        42,
+        {"tool_input": {"file_path": 123}},
+    ])
+    def test_malformed_payloads_exit_zero_silently(self, payload, capsys):
+        """All five crashed with a traceback before the guard was widened, and a
+        non-zero hook exit puts that traceback's first line in the transcript."""
+        assert self._run(payload) == 0
+        out, err = capsys.readouterr()
+        assert out.strip() == "" and err == ""
+
     def test_allows_targeted_read(self, tmp_path):
         p = tmp_path / "big.md"
         p.write_text("x" * 5000)

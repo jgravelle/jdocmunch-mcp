@@ -213,6 +213,33 @@ function -- and it is tested against each spelling and against the correct
 pins that a failed spawn does not roll back the debounce stamp. No tool, schema
 or INDEX_VERSION change; no CLI flag added or removed.
 
+### Fixed - valid JSON that is not a valid payload crashed the hook handlers
+
+The hint's delivery channel (JSON `hookSpecificOutput.additionalContext` on
+stdout) is not part of this entry: it shipped in 1.140.0 as #129, credited
+there. This entry is the crash alone.
+
+`run_pretooluse`'s try/except covered only `json.load`, so five valid-JSON
+shapes -- `tool_input` as a string, a top-level null/list/number, and
+`file_path` as a number -- crashed with a traceback. A non-zero hook exit is a
+non-blocking error whose FIRST LINE OF STDERR the transcript shows, so those
+were putting "Traceback (most recent call last):" in front of users.
+
+`run_posttooluse` read `data.get("tool_input", {}).get("file_path", "")` and
+crashed on the same shapes, so guarding the reported handler alone would have
+left its neighbour broken. Every `run_*` handler in `cli/hooks.py` and
+`cli/_hook_probe.py` is now wrapped in `_guarded`, which swallows anything
+unexpected, returns 0 and leaves the opt-in `JDOCMUNCH_HOOK_LOG` breadcrumb, so
+a failure is observable rather than silent. The Read hook's breadcrumb tests the
+environment switch with `os` alone and imports the writer only when logging is
+on, so the leaf module's import set is unchanged.
+
+`tests/test_hook_payload_shapes.py` does not name a handler. It enumerates every
+`run_*` function in the hook modules, requires each to be guarded, cross-checks
+them against the `hook-*` branches in `cli/main.py`, and runs each over every
+shape both in process and through a real `python -m jdocmunch_mcp` subprocess,
+so a handler added later is in scope the moment it exists.
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)
