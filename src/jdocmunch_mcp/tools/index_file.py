@@ -1,5 +1,6 @@
 """Re-index a single file within an existing index."""
 
+import json
 import time
 from pathlib import Path
 from typing import Optional
@@ -19,19 +20,56 @@ from ._embedding_coverage import attach_embedding_coverage as _attach_embedding_
 from ._git import local_git_head, local_git_paths_dirty, local_git_paths_tracked
 
 
+def _owner_by_source_root(
+    file_path: Path,
+    store: DocStore,
+) -> Optional[tuple[str, str, str, Path]]:
+    """The local index whose stored ``source_root`` contains the file (#172).
+
+    Reads the ``<name>.summary.json`` sidecars (jdoc#77), which carry
+    ``source_root``, and takes the LONGEST root that contains the file, so a
+    nested index wins over one rooted above it. The same rule the PreToolUse
+    probe uses (``cli/_hook_probe._index_state``), so the Read hint and the
+    refresh it recommends agree on which index owns a file.
+    """
+    best = None
+    for sidecar in sorted((store.base_path / "local").glob("*.summary.json")):
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            root = (meta.get("source_root") or "").strip() if isinstance(meta, dict) else ""
+            if not root:
+                continue
+            source_root = Path(root).expanduser().resolve()
+            rel_path = file_path.relative_to(source_root).as_posix()
+        except (OSError, ValueError):
+            continue
+        if best is None or len(str(source_root)) > len(str(best[3])):
+            best = ("local", sidecar.name[: -len(".summary.json")], rel_path, source_root)
+    return best
+
+
 def _find_owning_index(
     file_path: Path,
     store: DocStore,
 ) -> Optional[tuple[str, str, str, Path]]:
     """Find which index owns a given file path.
 
-    Walks up the directory tree from the file, checking each ancestor
-    folder name against existing local indexes.  When a match is found,
-    verifies that the relative path exists in the index's doc_paths.
+    #172: the owner is the index whose stored ``source_root`` contains the
+    file. Until 1.146.0 this matched ancestor FOLDER NAMES against index
+    names, so an index built with ``--name`` was never found, and an ancestor
+    folder that happened to share an index's name re-rooted the file there
+    and added its sections a second time under the wrong path.
+
+    The folder-name walk remains only for an index with no summary sidecar or
+    no stored ``source_root`` (saved before either existed), and it now skips
+    any index whose stored root is a different directory.
 
     Returns (owner, name, rel_path, source_root) or None.
     """
     file_path = file_path.resolve()
+    owned = _owner_by_source_root(file_path, store)
+    if owned is not None:
+        return owned
     parts = file_path.parts
 
     # Try each ancestor directory as a potential source root
@@ -51,6 +89,16 @@ def _find_owning_index(
             continue
         if index is None:
             continue
+
+        # #172: a stored root that is somewhere else means this index only
+        # shares the folder's name. Its true root was already searched above.
+        stored_root = getattr(index, "source_root", "") or ""
+        if stored_root:
+            try:
+                if Path(stored_root).expanduser().resolve() != candidate_root:
+                    continue
+            except (OSError, ValueError):
+                continue
 
         # Check if the file's relative path is in this index
         try:

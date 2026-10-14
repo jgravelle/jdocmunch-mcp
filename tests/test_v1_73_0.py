@@ -106,9 +106,13 @@ def test_index_file_name_override_on_spaced_folder():
         index_local(path=str(corpus), name="spaced-repro", storage_path=store,
                     use_ai_summaries=False, use_embeddings=False)
 
-        # Detection cannot reverse a spaced folder name -> fails without --name.
-        assert not index_file(str(doc), storage_path=store).get("success")
-        # Explicit name resolves it.
+        # #172: detection reads the stored source_root, so a spaced folder and a
+        # custom name resolve without --name. (Until 1.146.0 it matched folder
+        # names and failed here, which this test used to pin.)
+        res = index_file(str(doc), storage_path=store)
+        assert res.get("success"), res
+        assert res["repo"] == "local/spaced-repro"
+        # Explicit name still resolves it.
         res = index_file(str(doc), storage_path=store, name="local/spaced-repro")
         assert res.get("success"), res
         assert res["repo"] == "local/spaced-repro"

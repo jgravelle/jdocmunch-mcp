@@ -315,6 +315,37 @@ the hooks see the same store as the server. This is disclosed rather than
 changed: the hook reading its own environment is what keeps it free of the
 server's configuration.
 
+### Fixed - `index-file` finds a file's index by its stored root, not by folder name (#172)
+
+`index-file` decided which index owned a file by comparing the names of the
+file's ancestor folders with index names. It never read the `source_root`
+each index stores. Two things followed.
+
+- **An index named something other than its folder was never found.** Built
+  with `index-local --path docs --name handbook`, every `index-file` call
+  returned "File not in any index". The PostToolUse edit hook runs
+  `index_file` and ignores a failure, so an agent's edits never reached that
+  index and nothing said so. The same held for a folder whose name has a
+  space, which is why `--name` existed on `index-file` (#38).
+- **An ancestor folder that shared an index's name took the file over.** With
+  `.../eq/corpus` indexed as `eq`, editing `corpus/GUIDE.md` re-rooted the
+  file at `.../eq`, reported success, and added its sections a second time as
+  `corpus/GUIDE.md`. The real document's sections stayed stale.
+
+The owner is now the local index whose stored root contains the file, and
+the longest root wins, so a nested index beats the one above it. The Read
+hint from the entry above uses the same rule, so the refresh it suggests
+updates the index it named. The folder-name match remains for an index saved
+before roots were stored, and it now skips an index whose stored root is a
+different directory.
+
+**What changes for a caller.** `index-file <path>` works without `--name` for
+a custom-named or spaced-folder index, where it used to fail. `--name` still
+picks an index explicitly. A file under no index's root is still refused.
+
+`tests/test_jdoc_172_index_file_owner.py` (7). With the fix reverted, 5 fail.
+`test_v1_73_0.py` had pinned the old failure and now pins the success.
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)

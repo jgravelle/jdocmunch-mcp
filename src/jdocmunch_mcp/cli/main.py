@@ -252,8 +252,9 @@ def main(argv: Optional[list] = None):
         "--name",
         help=(
             "Index name (owner/name or bare name) to update directly, skipping "
-            "folder-name detection. Required for a custom --name index or a "
-            "corpus root whose folder name is not path-safe (e.g. has spaces)."
+            "detection. Detection finds the index whose stored source root "
+            "contains the file, so this is needed only to pick a different "
+            "index or for an index saved before roots were stored."
         ),
     )
 
