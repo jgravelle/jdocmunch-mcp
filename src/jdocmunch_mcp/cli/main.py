@@ -140,7 +140,8 @@ def main(argv: Optional[list] = None):
     #
     # ⚠ The argparse tree is the SMALL half, which is the opposite of what this
     # was expected to show. It is worth skipping, but on its own it would not
-    # have justified a second dispatch path.
+    # have justified a second dispatch path. The harness that times it is
+    # `benchmarks/hook_path/measure.py`.
     #
     # ⚠⚠ THE INTEGRITY CHECK IS DELIBERATELY NOT RUN HERE, and that is the one
     # behavioural difference on this path. Its only output is a stderr print,
