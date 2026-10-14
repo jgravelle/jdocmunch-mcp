@@ -171,6 +171,14 @@ def _doc_index_literals(tree):
     ]
 
 
+# The one sanctioned second copy. The PreToolUse Read hook's probe must not
+# import ``pathlib`` or the ``storage`` package (``tests/test_cli_import_cost.py``
+# ratchets that), so it derives the root with ``os.path`` instead of calling
+# ``storage.paths``. ``test_hook_probe_root_matches_storage_paths`` holds the two
+# copies equal, which is the guarantee this ratchet exists to give.
+_ROOT_COPIES = {("cli", "_hook_probe.py")}
+
+
 def test_only_storage_paths_names_the_home_root():
     """Ratchet: a new module that builds its own ``~/.doc-index`` fallback
     reintroduces #146 for whatever it stores."""
@@ -178,9 +186,24 @@ def test_only_storage_paths_names_the_home_root():
     for py in SRC.rglob("*.py"):
         if py.name == "paths.py" and py.parent.name == "storage":
             continue
+        if (py.parent.name, py.name) in _ROOT_COPIES:
+            continue
         lines = _doc_index_literals(ast.parse(py.read_text(encoding="utf-8")))
         offenders += [f"{py.relative_to(SRC)}:{ln}" for ln in lines]
     assert offenders == [], offenders
+
+
+@pytest.mark.parametrize("env", [None, "set"])
+def test_hook_probe_root_matches_storage_paths(env, tmp_path, monkeypatch):
+    """The exempted copy in ``_hook_probe`` must resolve the same root as
+    ``storage.paths``, with and without ``DOC_INDEX_PATH``."""
+    from jdocmunch_mcp.cli import _hook_probe
+    from jdocmunch_mcp.storage import paths
+    if env:
+        monkeypatch.setenv("DOC_INDEX_PATH", str(tmp_path / "root"))
+    else:
+        monkeypatch.delenv("DOC_INDEX_PATH", raising=False)
+    assert Path(_hook_probe._doc_index_base()) == paths.default_root()
 
 
 def test_ratchet_catches_the_shape_it_names():

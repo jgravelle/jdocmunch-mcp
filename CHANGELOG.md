@@ -240,6 +240,62 @@ them against the `hook-*` branches in `cli/main.py`, and runs each over every
 shape both in process and through a real `python -m jdocmunch_mcp` subprocess,
 so a handler added later is in scope the moment it exists.
 
+### Added - the hint only fires when it would actually help
+
+Steering a reader to `search_sections` for a file no index holds sends them
+somewhere that cannot answer; steering them at a STALE index is worse, because
+it answers with superseded content while the `Read` they were about to do would
+have returned the right bytes. `_index_state` resolves a path to one of `fresh`,
+`stale`, `unverified` or `unindexed` using only stdlib: it reads the tiny
+`<name>.summary.json` sidecars for `source_root` (most specific root wins, since
+indexes nest), then looks at the file's mirror copy.
+
+⚠⚠ **Staleness is decided by CONTENT, with the mtime and the size only as cheap
+pre-filters.** A source that is not newer than its mirror and has the mirror's
+size is `fresh` without reading either: two stats, which is the common case. A
+source that IS newer proves nothing on its own: indexing is keyed on a content
+hash, and an incremental pass does not rewrite the mirror of a file whose hash
+did not change, so a `touch`, a `git stash pop` or a revert to identical bytes
+leaves the source permanently newer than a mirror that is still correct. And a
+source of a different SIZE is compared whatever its mtime, because a changed
+file can arrive with an older or preserved mtime (`cp -p`, `rsync -t`, a tar
+extract). Only a source whose bytes differ from the mirror is `stale`. ⚠ The
+bound that remains: an edit that keeps both the size and an older-or-equal mtime
+is not seen.
+
+⚠ **Some formats are mirrored as PREPROCESSED text**, not verbatim: `.mdx`,
+`.ipynb`, `.html`/`.htm`, `.xml`/`.svg`/`.xhtml`, `.tscn`/`.tres`, `.jsonc` and
+`.json` are converted before storage, so a byte comparison would call every
+newer one stale. For those the gate never claims staleness: a newer source is
+`unverified`, and `unverified` says nothing. The verbatim set is tied to
+`preprocess_content` by a test, and the comparison replays the two ways a
+verbatim mirror still differs (a leading BOM is dropped, and invalid UTF-8
+becomes U+FFFD). A sidecar whose JSON is not an object is skipped instead of
+aborting the scan for every healthy index.
+
+`fresh` steers. `stale` reports the staleness and steers NOWHERE, naming real
+remedies: the `jdocmunch-mcp index-file <path>` CLI subcommand, the
+`index_local` tool, and the `watch` daemon. (There is no `index_file` MCP tool,
+and a test now checks every tool a hint names against the server's tool list.)
+`unverified` and `unindexed` say nothing. ⚠ The hook deliberately does NOT
+reindex: `incremental_save` runs `compute_corpus_stats` over the whole corpus
+with a content loader regardless of how small the edited file was, and `Read` is
+a far hotter trigger than `Edit` -- the same unbounded fan-out that jdoc#76
+records as having "took down a 16 GB machine". It also could not help the read
+that triggered it.
+
+⚠⚠ **Where `DOC_INDEX_PATH` must be set.** The gate finds the store from the
+hook process's own environment: `DOC_INDEX_PATH` if it is set there, else
+`~/.doc-index`. Hooks run in the environment Claude Code runs in, not in the MCP
+server's. A user who sets `DOC_INDEX_PATH` only in the `env` of the MCP client's
+server entry, which reaches `serve` and nothing else, will find the hint gone
+silent where it used to fire on every large doc file, because the hook looks in
+the default store, finds no index and reads the file as `unindexed`. Set it in
+the environment Claude Code is launched from (a shell profile, for example) and
+the hooks see the same store as the server. This is disclosed rather than
+changed: the hook reading its own environment is what keeps it free of the
+server's configuration.
+
 ## [1.145.5] - 2026-10-14 - a cold search checks each document's path once
 
 ### Changed - a cold search checks each document's path once, not once per section (#169)

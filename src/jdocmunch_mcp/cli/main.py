@@ -129,8 +129,9 @@ def main(argv: Optional[list] = None):
     """Main entry point."""
     # ⚠⚠ THE PreToolUse FAST PATH. Claude Code fires `hook-pretooluse` as a
     # fresh process on EVERY `Read`, and that process does very little work: a
-    # JSON parse, an extension test, a size test, and at most one JSON line on
-    # stdout. Everything else it pays is this function's preamble:
+    # JSON parse, an extension test, a size test, an index-state probe over the
+    # tiny summary sidecars, and at most one JSON line on stdout. Everything
+    # else it pays is this function's preamble:
     #
     #     verify_package_integrity()   packages_distributions() reads metadata
     #                                  for every installed distribution, and is

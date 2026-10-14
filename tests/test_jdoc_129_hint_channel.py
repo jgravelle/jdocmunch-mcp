@@ -21,6 +21,8 @@ import io
 import json
 from unittest import mock
 
+import pytest
+
 from jdocmunch_mcp.cli import hooks
 from jdocmunch_mcp.cli.hooks import run_pretooluse
 
@@ -30,29 +32,42 @@ def _run(payload: dict) -> int:
         return run_pretooluse()
 
 
-def _big(tmp_path):
-    p = tmp_path / "big.md"
+@pytest.fixture
+def big(tmp_path, monkeypatch):
+    """A large doc file that is indexed and current.
+
+    The hint is gated on the file being in an index that is current for it;
+    an unindexed file is correctly silent, so a bare file would test nothing.
+    """
+    from jdocmunch_mcp.tools.index_local import index_local
+    src = tmp_path / "src"
+    store = tmp_path / "store"
+    src.mkdir()
+    p = src / "big.md"
     p.write_text("x" * 5000)
+    index_local(path=str(src), name="hintprobe", use_ai_summaries=False,
+                use_embeddings=False, storage_path=str(store))
+    monkeypatch.setenv("DOC_INDEX_PATH", str(store))
     return p
 
 
 class TestHintChannel:
-    def test_hint_is_additional_context_json_on_stdout(self, tmp_path, capsys):
-        assert _run({"tool_input": {"file_path": str(_big(tmp_path))}}) == 0
+    def test_hint_is_additional_context_json_on_stdout(self, big, capsys):
+        assert _run({"tool_input": {"file_path": str(big)}}) == 0
         captured = capsys.readouterr()
         payload = json.loads(captured.out)
         out = payload["hookSpecificOutput"]
         assert out["hookEventName"] == "PreToolUse"
-        assert out["additionalContext"].startswith("jDocMunch hint: this is a 5,000-byte doc file.")
+        assert out["additionalContext"].startswith("jDocMunch hint: this is a 5,000-byte doc file,")
         assert "search_sections" in out["additionalContext"]
 
-    def test_nothing_on_stderr(self, tmp_path, capsys):
-        _run({"tool_input": {"file_path": str(_big(tmp_path))}})
+    def test_nothing_on_stderr(self, big, capsys):
+        _run({"tool_input": {"file_path": str(big)}})
         assert capsys.readouterr().err == ""
 
-    def test_no_permission_decision_so_the_read_is_still_allowed(self, tmp_path, capsys):
+    def test_no_permission_decision_so_the_read_is_still_allowed(self, big, capsys):
         """Advisory only: a hard deny breaks Read-before-Edit."""
-        _run({"tool_input": {"file_path": str(_big(tmp_path))}})
+        _run({"tool_input": {"file_path": str(big)}})
         payload = json.loads(capsys.readouterr().out)
         assert "permissionDecision" not in payload["hookSpecificOutput"]
         assert "decision" not in payload

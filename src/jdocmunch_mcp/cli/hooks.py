@@ -30,13 +30,15 @@ import sys
 import time
 
 # ⚠ Re-exports, not definitions. See ``_hook_probe`` for why the Read
-# interceptor owns its own leaf module; two copies of ``run_pretooluse`` would
-# drift.
+# interceptor owns its own leaf module; two copies of ``_index_state`` would
+# drift on whether to steer a reader at a stale index, which is correctness.
 from ._hook_probe import (  # noqa: F401
     _DOC_EXTENSIONS,
     _MIN_SIZE_BYTES,
+    _doc_index_base,
     _emit_additional_context,
     _guarded,
+    _index_state,
     run_pretooluse,
 )
 

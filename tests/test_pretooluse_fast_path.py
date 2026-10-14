@@ -5,8 +5,8 @@ tree and before `verify_package_integrity()`, because Claude Code fires that
 subcommand as a fresh process on every `Read` and the process does very little
 work. The saving is only legitimate if the two paths are observably the same,
 so this file compares them as real subprocesses -- exit code, stdout bytes and
-stderr bytes -- across every payload shape `tests/test_hooks.py` pins, plus the
-file-size and targeted-read conditions.
+stderr bytes -- across every payload shape `tests/test_hooks.py` pins plus all
+three index states.
 
 ⚠ The comparison is BYTES, not "contains search_sections". The hint text is
 what reaches the model, and a difference of one character is a changed hook.
@@ -77,7 +77,6 @@ _SHAPES = [
     json.dumps({"tool_input": {"file_path": "app.py"}}),
     json.dumps({"tool_input": {"file_path": "/nonexistent/doc.md"}}),
     json.dumps({"tool_input": {}}),
-    # The five valid-JSON shapes that crashed the handler before it was guarded.
     json.dumps({"tool_input": "notadict"}),
     json.dumps(None),
     json.dumps([1, 2]),
@@ -93,37 +92,70 @@ def test_identical_on_every_payload_shape(payload, tmp_path):
     _assert_identical(payload, str(tmp_path / "empty-store"))
 
 
-# --- and on the file-based conditions, against real files -------------------
+# --- and on all three index states, against a real index ---------------------
 
 @pytest.fixture(scope="module")
-def files(tmp_path_factory):
+def indexed(tmp_path_factory):
+    """A real index over one big doc file, plus a stale sibling and an orphan."""
+    from jdocmunch_mcp.tools.index_local import index_local
     root = tmp_path_factory.mktemp("fastpath")
-    big = root / "big.md"
-    big.write_text("# Big\n\n" + "x " * 3000, encoding="utf-8")
-    small = root / "small.md"
+    src, store = root / "src", root / "store"
+    src.mkdir()
+    fresh = src / "fresh.md"
+    fresh.write_text("# Fresh\n\n" + "x " * 3000, encoding="utf-8")
+    stale = src / "stale.md"
+    stale.write_text("# Stale\n\n" + "y " * 3000, encoding="utf-8")
+    index_local(path=str(src), name="fastpath", use_ai_summaries=False,
+                use_embeddings=False, storage_path=str(store))
+    # Edit the source AFTER indexing, with an mtime past its mirror's, so the
+    # staleness branch fires. (Staleness is decided by content: a bare utime
+    # with identical bytes is fresh, which test_hook_probe_staleness.py pins.)
+    import time
+    stale.write_text("# Stale\n\n" + "w " * 3000, encoding="utf-8")
+    future = time.time() + 120
+    os.utime(stale, (future, future))
+    orphan = root / "orphan.md"
+    orphan.write_text("z" * 5000, encoding="utf-8")
+    small = src / "small.md"
     small.write_text("hi", encoding="utf-8")
-    return big, small
+    return str(store), fresh, stale, orphan, small
 
 
-def test_identical_and_hints_on_a_large_doc_file(files, tmp_path):
-    big, _ = files
-    _, out, _ = _assert_identical(
-        json.dumps({"tool_input": {"file_path": str(big)}}), str(tmp_path))
+def test_identical_and_steers_on_a_fresh_index(indexed):
+    store, fresh, _, _, _ = indexed
+    rc, out, _ = _assert_identical(
+        json.dumps({"tool_input": {"file_path": str(fresh)}}), store)
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert ctx.startswith("jDocMunch hint: this is a ") and "search_sections" in ctx
+    assert "Prefer search_sections" in ctx and "local/fastpath" in ctx
 
 
-def test_identical_and_silent_for_a_small_file(files, tmp_path):
-    _, small = files
+def test_identical_and_reports_a_stale_index(indexed):
+    store, _, stale, _, _ = indexed
+    rc, out, _ = _assert_identical(
+        json.dumps({"tool_input": {"file_path": str(stale)}}), store)
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "OLDER than the file" in ctx
+    assert "Prefer search_sections" not in ctx
+
+
+def test_identical_and_silent_for_an_unindexed_file(indexed):
+    store, _, _, orphan, _ = indexed
     _, out, _ = _assert_identical(
-        json.dumps({"tool_input": {"file_path": str(small)}}), str(tmp_path))
+        json.dumps({"tool_input": {"file_path": str(orphan)}}), store)
     assert out == b""
 
 
-def test_identical_for_a_targeted_read(files, tmp_path):
-    big, _ = files
+def test_identical_and_silent_for_a_small_file(indexed):
+    store, _, _, _, small = indexed
+    _, out, _ = _assert_identical(
+        json.dumps({"tool_input": {"file_path": str(small)}}), store)
+    assert out == b""
+
+
+def test_identical_for_a_targeted_read(indexed):
+    store, fresh, _, _, _ = indexed
     _, out, _ = _assert_identical(json.dumps(
-        {"tool_input": {"file_path": str(big), "offset": 10, "limit": 5}}), str(tmp_path))
+        {"tool_input": {"file_path": str(fresh), "offset": 10, "limit": 5}}), store)
     assert out == b""
 
 

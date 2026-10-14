@@ -16,18 +16,45 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _additional_context(stdout: str) -> str:
-    """The one exit-0 PreToolUse channel Claude Code feeds to the model (#129)."""
-    payload = json.loads(stdout)
-    out = payload["hookSpecificOutput"]
-    assert out["hookEventName"] == "PreToolUse"
-    return out["additionalContext"]
-
-
 class TestPreToolUse:
     """Tests for hook-pretooluse handler."""
 
-    def _run(self, payload: dict) -> int:
+    @staticmethod
+    def _indexed(tmp_path, monkeypatch, filename, body):
+        """Build a real index over one file and point the hook's probe at it.
+
+        The steer is gated on the file being indexed AND current, so a bare
+        tmp_path file is correctly silent -- these tests would otherwise be
+        asserting a hint the shipped gate refuses to give.
+        """
+        from jdocmunch_mcp.tools.index_local import index_local
+        src = tmp_path / "src"
+        store = tmp_path / "store"
+        src.mkdir()
+        target = src / filename
+        target.write_text(body, encoding="utf-8")
+        index_local(path=str(src), name="hookprobe", use_ai_summaries=False,
+                    use_embeddings=False, storage_path=str(store))
+        monkeypatch.setenv("DOC_INDEX_PATH", str(store))
+        return target
+
+    @staticmethod
+    def _context(captured) -> str:
+        """The additionalContext the hook emitted, or "" when it stayed silent.
+
+        Also asserts what the pre-gating helper asserted: nothing on stderr (an
+        exit-0 hook's stderr goes to a debug log nobody reads, #129) and the
+        event name Claude Code expects on the JSON it does read.
+        """
+        assert captured.err == ""
+        out = captured.out.strip()
+        if not out:
+            return ""
+        payload = json.loads(out)["hookSpecificOutput"]
+        assert payload["hookEventName"] == "PreToolUse"
+        return payload["additionalContext"]
+
+    def _run(self, payload) -> int:
         from jdocmunch_mcp.cli.hooks import run_pretooluse
         with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
             return run_pretooluse()
@@ -40,13 +67,41 @@ class TestPreToolUse:
         p.write_text("hi")
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
 
-    def test_warns_on_large_doc_file(self, tmp_path, capsys):
-        p = tmp_path / "big.md"
-        p.write_text("x" * 5000)
+    def test_warns_on_large_doc_file(self, tmp_path, monkeypatch, capsys):
+        p = self._indexed(tmp_path, monkeypatch, "big.md", "# Big\n\n" + "x " * 3000)
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
-        captured = capsys.readouterr()
-        assert "jDocMunch hint" in _additional_context(captured.out)
-        assert captured.err == ""
+        ctx = self._context(capsys.readouterr())
+        assert "search_sections" in ctx and "local/hookprobe" in ctx
+
+    def test_says_nothing_for_an_unindexed_file(self, tmp_path, monkeypatch, capsys):
+        """Steering to search_sections for a file no index holds sends the reader
+        somewhere that cannot answer. Read was already the right call."""
+        monkeypatch.setenv("DOC_INDEX_PATH", str(tmp_path / "empty-store"))
+        p = tmp_path / "orphan.md"
+        p.write_text("x" * 5000, encoding="utf-8")
+        assert self._run({"tool_input": {"file_path": str(p)}}) == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_reports_staleness_without_steering(self, tmp_path, monkeypatch, capsys):
+        """Worse than unindexed: the index WOULD answer, with superseded bytes.
+
+        So the hook reports the fact and steers nowhere. It does not reindex --
+        that costs whole-corpus tokenization on a trigger hotter than Edit, and
+        it could not help this read anyway. The agent decides."""
+        import os as _os
+        import time as _time
+        p = self._indexed(tmp_path, monkeypatch, "big.md", "# Big\n\n" + "x " * 3000)
+        # A real edit, with an mtime forward of the indexed mirror. (A touch
+        # with identical bytes is NOT stale: see test_hook_probe_staleness.py.)
+        p.write_text("# Big\n\n" + "y " * 3000, encoding="utf-8")
+        future = _time.time() + 120
+        _os.utime(p, (future, future))
+        assert self._run({"tool_input": {"file_path": str(p)}}) == 0
+        ctx = self._context(capsys.readouterr())
+        assert "OLDER than the file" in ctx
+        assert "Read is correct here" in ctx
+        # Must NOT recommend the retrieval tools: they would serve stale bytes.
+        assert "Prefer search_sections" not in ctx
 
     @pytest.mark.parametrize("payload", [
         {"tool_input": "notadict"},
@@ -72,17 +127,17 @@ class TestPreToolUse:
         p.write_text("hi")
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
 
-    def test_warns_on_large_rst(self, tmp_path, capsys):
-        p = tmp_path / "doc.rst"
-        p.write_text("x" * 5000)
+    def test_warns_on_large_rst(self, tmp_path, monkeypatch, capsys):
+        p = self._indexed(tmp_path, monkeypatch, "doc.rst",
+                          "Big\n===\n\n" + "x " * 3000)
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
-        assert "jDocMunch hint" in _additional_context(capsys.readouterr().out)
+        assert "search_sections" in self._context(capsys.readouterr())
 
-    def test_warns_on_large_adoc(self, tmp_path, capsys):
-        p = tmp_path / "doc.adoc"
-        p.write_text("x" * 5000)
+    def test_warns_on_large_adoc(self, tmp_path, monkeypatch, capsys):
+        p = self._indexed(tmp_path, monkeypatch, "doc.adoc",
+                          "= Big\n\n" + "x " * 3000)
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
-        assert "jDocMunch hint" in _additional_context(capsys.readouterr().out)
+        assert "search_sections" in self._context(capsys.readouterr())
 
     def test_handles_invalid_json(self):
         from jdocmunch_mcp.cli.hooks import run_pretooluse
