@@ -188,16 +188,20 @@ failed connection and not respawned, and `os.execv` keeps the file descriptors
 but not the completed `initialize` handshake. So the design is DETECT AND
 DISCLOSE, never self-restart.
 
-Two signals, both in `runtime_staleness`: the version in the on-disk
-`.dist-info/METADATA` against the version this process loaded
-(`__version__` is resolved once and kept), and the mtimes of `__init__.py` and
-`server.py` against the time the process started (the OS value on Windows and
+Two signals, both in `runtime_staleness`: the installed version against the
+version this process loaded (`__version__` is resolved once and kept), and the
+mtimes of `__init__.py` and `server.py` against the time the process started (the OS value on Windows and
 Linux, otherwise the time the server module loaded), with two seconds of slack
 because the Linux value can read up to a second early. The key is absent when
 neither fires, so the response shape is unchanged for everyone unaffected.
 
 - The default config strips `_meta`, so the top-level key is the one a default
   caller receives; the `_meta` copy is added only when `meta_fields` keeps it.
+- The installed version is read through the same `importlib.metadata` lookup
+  that resolves `__version__`, so a leftover `.dist-info` from an interrupted
+  upgrade cannot make a fresh server report drift. Reading the directory beside
+  the package could pick a different one than the lookup did, and then fire on
+  every call until the process ended.
 - The package DIRECTORY's mtime is deliberately not watched: Python writes
   `__pycache__/` there on first import after an install, so watching it would
   flag every freshly started server.

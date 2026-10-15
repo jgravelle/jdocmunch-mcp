@@ -82,6 +82,7 @@ _TTL_SECONDS = 5.0
 
 _cache: dict = {"checked_at": 0.0, "report": None}
 _failure_logged = False
+_version_failure_logged = False
 
 
 def _package_dir() -> Path:
@@ -98,28 +99,50 @@ def _running_version() -> str:
 
 
 def _installed_version() -> Optional[str]:
-    """The version recorded on DISK right now.
+    """The version the environment holds right now, or ``None`` if it has none.
 
     The running version is ``jdocmunch_mcp.__version__``, resolved once and kept
     for the life of the process, so after a reinstall it still holds the old
-    value. This reads the ``.dist-info/METADATA`` beside the package to get the
-    value the disk holds now.
+    value. This asks the SAME resolver, ``importlib.metadata.version``, again.
+
+    Why the resolver and not a glob of ``jdocmunch_mcp-*.dist-info`` beside the
+    package: the running value comes from that resolver, so two readings of one
+    unchanged environment always agree. A glob can pick a different dist-info
+    than the resolver did (a leftover from an interrupted upgrade or a failed
+    uninstall, or a dist-info on another path entry) and would then report
+    drift on every tool call for the life of the process, which a restart does
+    not clear.
+
+    ``invalidate_caches()`` first, as a defensive measure: ``importlib.metadata``
+    already keys its directory cache on the directory's mtime, so a reinstall
+    is normally seen without it, and no test pins the call. It covers a
+    filesystem whose directory mtime is too coarse to show a quick replace. The
+    cost is bounded by ``_TTL_SECONDS``, since ``staleness_report`` calls this
+    at most once per TTL.
+
+    Any other failure of the lookup (a METADATA that is not valid UTF-8 raises
+    ``UnicodeDecodeError``, for one) also reads as ``None``. The version and
+    file-mtime signals are independent, and a version probe that raised would
+    take ``files_changed`` down with it. The failure is logged once, at debug
+    level.
+
+    Imported here so importing this module stays cheap; the hook and CLI entry
+    points never reach this function.
     """
+    import importlib
+    import importlib.metadata
+
     try:
-        site_dir = _package_dir().parent
-        for entry in site_dir.glob("jdocmunch_mcp-*.dist-info"):
-            metadata = entry / "METADATA"
-            if not metadata.is_file():
-                continue
-            with open(metadata, "r", encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    if line.startswith("Version:"):
-                        return line.split(":", 1)[1].strip()
-                    if not line.strip():
-                        break  # end of headers
-    except OSError:
-        pass
-    return None
+        importlib.invalidate_caches()
+        return importlib.metadata.version("jdocmunch-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception:
+        global _version_failure_logged
+        if not _version_failure_logged:
+            _version_failure_logged = True
+            logger.debug("installed version unreadable; skipping it", exc_info=True)
+        return None
 
 
 def _changed_paths() -> list:
