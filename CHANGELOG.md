@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Changed - `get_toc`, `get_toc_tree` and `list_docs` are paged, and refuse a megabyte answer (#176)
+
+All three answered with the whole index in one response. Measured on a
+synthetic index of 3,000 documents and 36,000 sections: `get_toc` returned
+14,029,726 bytes, `get_toc_tree` 7,232,682 and `list_docs` 381,193. An agent
+pays for that in context, and the jcodemunch side found the same shape at
+15.9 MB on a real docs-heavy repository.
+
+**Paging.** `limit` and `offset` on all three, and `path_glob` on `list_docs`,
+which had no way to narrow at all. `get_toc` pages by section; `get_toc_tree`
+and `list_docs` page by document, so a document's tree is never split. Every
+response, paged or not, carries `<unit>_total`, `<unit>_truncated` and
+`next_offset`. They are always present because a disclosure key that appears
+only when it fires can't be told apart from one that was never computed.
+
+**A ceiling, `JDOCMUNCH_RESPONSE_MAX_BYTES`, default 1 MiB.** Over it the call
+is refused with `narrow_with`, `response_bytes`, the item total and a
+`suggested_limit`. A retry at that limit fits: on 12,000 sections the
+3,580,802-byte refusal suggested 2,811, and the retry came back at 838,489
+bytes. ⚠ **It refuses, it never truncates.** A shortened list that nobody
+asked to shorten reads as the whole index. jcodemunch refuses for the same
+reason.
+
+⚠ **This changes a default on 1.x.** A call on an index large enough to cross
+1 MiB used to return data and now returns an error that says how to narrow
+it. jjg chose this over opt-in paging on 2026-10-15. Set
+`JDOCMUNCH_RESPONSE_MAX_BYTES=0` for the previous behaviour. A value that
+doesn't parse, or a negative one, keeps the default, so a typo can't remove
+the bound.
+
+`list_docs`' `total_section_count` and `total_byte_size` still describe the
+whole index. `_meta.docs_with_mtime` now counts the documents returned, so it
+stays comparable with `doc_count`; an unpaged call counts every document, as
+before.
+
 ### Added - every tool response says when the server is running superseded code
 
 New response key `server_build_stale`, returned top-level on every tool response

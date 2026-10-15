@@ -246,14 +246,50 @@ index_repo: { "url": "owner/repo", "incremental": false }
 | `index_repo`            | Index GitHub repository docs                     | `url`, `use_ai_summaries`, `incremental`                         |
 | `list_repos`            | List all indexed documentation sets              | —                                                                |
 | `doc_resolve_repo`      | Resolve a path to its doc-index handle (O(1)-sized). In a linked Git worktree of an indexed corpus, the not-found response additively lists the established handle in `canonical_candidates` + `worktree_resolution` (read-only) | `path`                                                        |
-| `get_toc`               | Flat section list in document order              | `repo`                                                           |
-| `get_toc_tree`          | Nested section tree per document                 | `repo`                                                           |
+| `get_toc`               | Flat section list in document order              | `repo`, `path_glob`, `limit`, `offset`                           |
+| `get_toc_tree`          | Nested section tree per document                 | `repo`, `path_glob`, `limit`, `offset`                           |
+| `list_docs`             | One row per document: sections, format, size     | `repo`, `path_glob`, `limit`, `offset`                           |
 | `get_document_outline`  | Section hierarchy for one document               | `repo`, `doc_path`                                               |
 | `search_sections`       | Weighted search across sections                  | `repo`, `query`, `doc_path`, `max_results`, `compact`, `fields`, `snippet_bytes` |
 | `get_section`           | Full content of one section                      | `repo`, `section_id`, `verify`                                   |
 | `get_sections`          | Batch content retrieval                          | `repo`, `section_ids`, `verify`                                  |
 | `get_section_context`   | Section + ancestor headings + child summaries    | `repo`, `section_id`, `max_tokens`, `include_children`           |
 | `delete_index`          | Delete index and cache                           | `repo`                                                           |
+
+---
+
+## Large Indexes: Paging and the Response Ceiling
+
+`get_toc`, `get_toc_tree` and `list_docs` describe a whole index, so on a
+large one the answer can be megabytes. Since v1.147.0 two things bound it.
+
+**Paging.** Pass `limit` and `offset`. `get_toc` pages by section;
+`get_toc_tree` and `list_docs` page by document, and a document's tree is
+never split across pages. Every response carries the same three keys, paged
+or not:
+
+| Key | Meaning |
+| --- | --- |
+| `sections_total` / `documents_total` / `docs_total` | How many exist after `path_glob`. This is the authority, not the length of the list. |
+| `sections_truncated` / `documents_truncated` / `docs_truncated` | `true` when more follow this page. |
+| `next_offset` | Pass it as `offset` for the next page; `null` on the last one. |
+
+`list_docs` also takes `path_glob`. Its `total_section_count` and
+`total_byte_size` still describe the whole index; `_meta.docs_with_mtime`
+counts the documents on the page, so it compares with `doc_count`.
+
+**The ceiling.** A response over `JDOCMUNCH_RESPONSE_MAX_BYTES` (default
+1 MiB) is refused, never truncated. The refusal names the parameters that
+narrow the call (`narrow_with`), the size it would have been
+(`response_bytes`), the item total, and a `suggested_limit` that fits. Set
+the variable to `0` to turn the ceiling off and get the pre-1.147 behaviour.
+An unparseable or negative value keeps the default.
+
+```json
+{"error": "get_toc response would be 3,580,802 bytes, over the 1,048,576-byte ceiling ...",
+ "response_bytes": 3580802, "response_max_bytes": 1048576,
+ "sections_total": 12000, "narrow_with": ["path_glob", "limit"], "suggested_limit": 2811}
+```
 
 ---
 

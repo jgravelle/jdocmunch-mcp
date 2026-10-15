@@ -577,6 +577,20 @@ def _all_tools() -> list[Tool]:
                     "repo": {
                         "type": "string",
                         "description": "Repository identifier"
+                    },
+                    "path_glob": {
+                        "type": "string",
+                        "description": "v1.147+ — fnmatch glob restricting the list to matching doc_paths. Default: no filter."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "v1.147+ — return at most this many docs, starting at offset. Default: all, subject to the response ceiling (JDOCMUNCH_RESPONSE_MAX_BYTES, 1 MiB), over which the call is refused, never truncated. docs_total, docs_truncated and next_offset are always present."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "v1.147+ — docs to skip. Pass the previous response's next_offset. Default 0."
                     }
                 },
                 "required": ["repo"]
@@ -595,6 +609,16 @@ def _all_tools() -> list[Tool]:
                     "path_glob": {
                         "type": "string",
                         "description": "v1.36+ — fnmatch glob restricting results to matching doc_paths (e.g. 'api/**/*.md', 'reference/*'). Default: no filter."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "v1.147+ — return at most this many sections, starting at offset. Default: all, subject to the response ceiling (JDOCMUNCH_RESPONSE_MAX_BYTES, 1 MiB), over which the call is refused, never truncated. sections_total, sections_truncated and next_offset are always present."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "v1.147+ — sections to skip. Pass the previous response's next_offset. Default 0."
                     }
                 },
                 "required": ["repo"]
@@ -613,6 +637,16 @@ def _all_tools() -> list[Tool]:
                     "path_glob": {
                         "type": "string",
                         "description": "v1.36+ — fnmatch glob restricting results to matching doc_paths. Default: no filter."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "v1.147+ — return at most this many documents (a document's tree is never split), starting at offset. Default: all, subject to the response ceiling (JDOCMUNCH_RESPONSE_MAX_BYTES, 1 MiB), over which the call is refused, never truncated. documents_total, documents_truncated and next_offset are always present."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "v1.147+ — documents to skip. Pass the previous response's next_offset. Default 0."
                     }
                 },
                 "required": ["repo"]
@@ -2255,6 +2289,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "list_docs":
             result = list_docs(
                 repo=arguments["repo"],
+                path_glob=arguments.get("path_glob"),
+                limit=arguments.get("limit"),
+                offset=arguments.get("offset", 0),
                 storage_path=storage_path,
             )
         elif name == "get_doc":
@@ -2273,12 +2310,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = get_toc(
                 repo=arguments["repo"],
                 path_glob=arguments.get("path_glob"),
+                limit=arguments.get("limit"),
+                offset=arguments.get("offset", 0),
                 storage_path=storage_path,
             )
         elif name == "get_toc_tree":
             result = get_toc_tree(
                 repo=arguments["repo"],
                 path_glob=arguments.get("path_glob"),
+                limit=arguments.get("limit"),
+                offset=arguments.get("offset", 0),
                 storage_path=storage_path,
             )
         elif name == "get_document_outline":
