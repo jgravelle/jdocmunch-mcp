@@ -16,11 +16,16 @@ import time
 from typing import Optional
 
 from ..storage import DocStore
+from ..storage.doc_store import path_glob_matches
+from ._response_bounds import ceiling_refusal, page, paging_args
 
 
 def list_docs(
     repo: str,
     storage_path: Optional[str] = None,
+    path_glob: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> dict:
     """Return a flat list of indexed documents with per-doc stats.
 
@@ -32,8 +37,18 @@ def list_docs(
         or 0 when the cache is missing — signal of a stale index)
 
     Sorted by `doc_path` ascending for stable output.
+
+    jdoc#176: ``path_glob`` restricts the list to matching doc_paths, and
+    ``limit`` / ``offset`` page it. ``doc_count`` is the length of THIS page;
+    ``docs_total`` is the count after ``path_glob``. ``total_section_count``
+    and ``total_byte_size`` still describe the WHOLE index, as they always
+    have. Over ``JDOCMUNCH_RESPONSE_MAX_BYTES`` the call is refused rather
+    than truncated.
     """
     t0 = time.perf_counter()
+    limit, offset, bad = paging_args(limit, offset)
+    if bad:
+        return {"error": bad}
     store = DocStore(base_path=storage_path)
     owner, name = store._resolve_repo(repo)
     index = store.load_index(owner, name)
@@ -49,7 +64,6 @@ def list_docs(
 
     docs: list = []
     total_bytes = 0
-    with_mtime = 0
     # jdoc#136: the STORED time, not a stat. `byte_size` below stats every
     # document anyway, so a live mtime would be free and fresher — and it would
     # make this key mean filesystem-time on a local index and commit-time on a
@@ -78,15 +92,21 @@ def list_docs(
         mt = mtimes.get(dp)
         if mt:
             entry["mtime"] = mt
-            with_mtime += 1
         docs.append(entry)
 
     docs.sort(key=lambda d: d["doc_path"])
+    if path_glob:
+        docs = [d for d in docs if path_glob_matches(d["doc_path"], path_glob)]
+    docs, paging = page(docs, limit, offset, "docs")
+    # Counted over the docs RETURNED, so it stays comparable with `doc_count`
+    # on a filtered or paged call. An unpaged call counts every doc, as before.
+    with_mtime = sum(1 for d in docs if "mtime" in d)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "docs": docs,
         "doc_count": len(docs),
+        **paging,
         "total_section_count": len(index.sections),
         "total_byte_size": total_bytes,
         "_meta": {
@@ -100,3 +120,10 @@ def list_docs(
             "docs_with_mtime": with_mtime,
         },
     }
+    if path_glob:
+        result["_meta"]["path_glob"] = path_glob
+    refusal = ceiling_refusal(
+        result, tool="list_docs", unit="docs", item_count=len(docs),
+        narrow_with=["path_glob", "limit"],
+    )
+    return refusal or result

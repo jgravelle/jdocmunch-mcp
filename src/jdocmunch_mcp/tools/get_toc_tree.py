@@ -6,12 +6,15 @@ from typing import Optional
 from ..storage import DocStore
 from ..storage.doc_store import path_glob_matches
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
+from ._response_bounds import ceiling_refusal, page, paging_args
 
 
 def get_toc_tree(
     repo: str,
     path_glob: Optional[str] = None,
     storage_path: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> dict:
     """Return a nested table of contents tree, grouped by document.
 
@@ -23,8 +26,18 @@ def get_toc_tree(
         path_glob: v1.36+ — when set, restrict to documents whose
             doc_path matches the fnmatch glob (e.g. ``"api/**/*.md"``).
             Default None means no filter.
+        limit: jdoc#176 — at most this many DOCUMENTS, starting at
+            ``offset``. A document's tree is never split across pages.
+            Default None returns every document, subject to the response
+            ceiling (``JDOCMUNCH_RESPONSE_MAX_BYTES``), over which the call is
+            refused rather than truncated.
+        offset: jdoc#176 — documents to skip, in doc_path order. Pass the
+            previous response's ``next_offset``.
     """
     t0 = time.perf_counter()
+    limit, offset, bad = paging_args(limit, offset)
+    if bad:
+        return {"error": bad}
     store = DocStore(base_path=storage_path)
     owner, name = store._resolve_repo(repo)
     index = store.load_index(owner, name)
@@ -41,6 +54,8 @@ def get_toc_tree(
     for sec in sorted(iter_sections, key=lambda s: (s.get("doc_path", ""), s.get("byte_start", 0))):
         dp = sec.get("doc_path", "")
         docs.setdefault(dp, []).append(sec)
+    doc_paths, paging = page(list(docs), limit, offset, "documents")
+    docs = {dp: docs[dp] for dp in doc_paths}
 
     def _make_node(sec: dict) -> dict:
         return {
@@ -90,9 +105,15 @@ def get_toc_tree(
     }
     if path_glob:
         meta["path_glob"] = path_glob
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "documents": tree_docs,
         "doc_count": len(tree_docs),
+        **paging,
         "_meta": meta,
     }
+    refusal = ceiling_refusal(
+        result, tool="get_toc_tree", unit="documents", item_count=len(tree_docs),
+        narrow_with=["path_glob", "limit"],
+    )
+    return refusal or result

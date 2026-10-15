@@ -6,12 +6,15 @@ from typing import Optional
 from ..storage import DocStore
 from ..storage.doc_store import path_glob_matches
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
+from ._response_bounds import ceiling_refusal, page, paging_args
 
 
 def get_toc(
     repo: str,
     path_glob: Optional[str] = None,
     storage_path: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> dict:
     """Return a flat table of contents for all sections in a repo.
 
@@ -22,8 +25,17 @@ def get_toc(
         path_glob: v1.36+ — when set, restrict to sections whose doc_path
             matches the fnmatch glob (e.g. ``"api/**/*.md"``,
             ``"reference/*"``). Default None means no filter.
+        limit: jdoc#176 — at most this many sections, starting at ``offset``.
+            Default None returns every section, subject to the response
+            ceiling (``JDOCMUNCH_RESPONSE_MAX_BYTES``), over which the call is
+            refused rather than truncated.
+        offset: jdoc#176 — sections to skip, in the sorted order. Pass the
+            previous response's ``next_offset``.
     """
     t0 = time.perf_counter()
+    limit, offset, bad = paging_args(limit, offset)
+    if bad:
+        return {"error": bad}
     store = DocStore(base_path=storage_path)
     owner, name = store._resolve_repo(repo)
     index = store.load_index(owner, name)
@@ -37,6 +49,7 @@ def get_toc(
     )
     if path_glob:
         sections = [s for s in sections if path_glob_matches(s.get("doc_path", ""), path_glob)]
+    sections, paging = page(sections, limit, offset, "sections")
 
     toc = []
     for sec in sections:
@@ -72,9 +85,15 @@ def get_toc(
     }
     if path_glob:
         meta["path_glob"] = path_glob
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "sections": toc,
         "section_count": len(toc),
+        **paging,
         "_meta": meta,
     }
+    refusal = ceiling_refusal(
+        result, tool="get_toc", unit="sections", item_count=len(toc),
+        narrow_with=["path_glob", "limit"],
+    )
+    return refusal or result
