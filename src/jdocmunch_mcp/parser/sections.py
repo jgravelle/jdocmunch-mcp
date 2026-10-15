@@ -195,37 +195,72 @@ def duplicate_anchor_report(sections) -> list:
     return report
 
 
+# v1.147.0: the duplicate-anchor list rides on every indexing response, and on
+# 1.x a list that ships unbounded cannot be capped later. The cap and the keys
+# that disclose it (`duplicate_anchors_total`, `duplicate_anchors_truncated`,
+# per-entry `section_ids_truncated`) arrive together.
+DUPLICATE_ANCHORS_CAP = 20      # entries in `duplicate_anchors`
+DUPLICATE_ANCHOR_IDS_CAP = 20   # `section_ids` / `titles` inside one entry
+# How many names a human-readable warning spells out before "(+N more)".
+WARNING_NAMES_SHOWN = 5
+
+
+def names_with_more(names, shown: int = WARNING_NAMES_SHOWN) -> str:
+    """``a, b, c (+N more)`` -- the first ``shown`` names, then the remainder's count."""
+    names = list(names)
+    text = ", ".join(names[:shown])
+    return f"{text} (+{len(names) - shown} more)" if len(names) > shown else text
+
+
 def duplicate_anchor_warning(report: list) -> str:
     """One human-readable line for a duplicate-anchor report, or "" when clean.
 
     A list of dicts is something a caller must decide to inspect; a sentence is
     something a model relays and a person reads. Both ship, because the list is
-    what a tool acts on and the sentence is what reaches the human.
+    what a tool acts on and the sentence is what reaches the human. Counts come
+    from the FULL report, never from the capped list a response carries.
     """
     if not report:
         return ""
-    shown = ", ".join(
-        f"{r['anchor']} x{r['count']} in {r['doc_path']}" for r in report[:3]
+    shown = names_with_more(
+        (f"{r['anchor']} x{r['count']} in {r['doc_path']}" for r in report), 3
     )
-    more = f" (+{len(report) - 3} more)" if len(report) > 3 else ""
     return (
         f"{len(report)} duplicate anchor id(s) written in the same document: "
-        f"{shown}{more}. A reference to one returns every match; give each "
+        f"{shown}. A reference to one is ambiguous; give each "
         f"heading a distinct {{#id}} to select one."
     )
 
 
 def duplicate_anchor_fields(sections) -> dict:
-    """The two response keys an indexing payload carries, built from one report.
+    """The response keys an indexing payload carries, built from one report.
 
     ``duplicate_anchors`` is empty and ``duplicate_anchor_warning`` is ``""`` when
     the sections hold no same-document duplicate. A payload that uses this helper
-    carries both keys even when clean, because a signal present only when it
+    carries every key even when clean, because a signal present only when it
     fires cannot be told from one that was never computed.
+
+    The list is capped at ``DUPLICATE_ANCHORS_CAP`` entries and each entry's
+    ``section_ids`` / ``titles`` at ``DUPLICATE_ANCHOR_IDS_CAP``. The authority is
+    the totals, not ``len()``: ``duplicate_anchors_total`` counts every entry,
+    each entry's ``count`` counts every heading, and ``*_truncated`` says whether
+    anything was cut. The report is sorted before the cut, so what is kept is
+    stable.
     """
     report = duplicate_anchor_report(sections)
+    capped = [
+        {
+            **r,
+            "section_ids": r["section_ids"][:DUPLICATE_ANCHOR_IDS_CAP],
+            "titles": r["titles"][:DUPLICATE_ANCHOR_IDS_CAP],
+            "section_ids_truncated": r["count"] > DUPLICATE_ANCHOR_IDS_CAP,
+        }
+        for r in report[:DUPLICATE_ANCHORS_CAP]
+    ]
     return {
-        "duplicate_anchors": report,
+        "duplicate_anchors": capped,
+        "duplicate_anchors_total": len(report),
+        "duplicate_anchors_truncated": len(report) > DUPLICATE_ANCHORS_CAP,
         "duplicate_anchor_warning": duplicate_anchor_warning(report),
     }
 

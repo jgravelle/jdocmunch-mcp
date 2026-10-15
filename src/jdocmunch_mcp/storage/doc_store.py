@@ -28,9 +28,31 @@ except ImportError:  # pragma: no cover - non-Windows
 
 from ..embeddings import embed_query, cosine_similarity
 
-from ..parser.sections import SAFE_ANCHOR_ID_RE
+from ..parser.sections import SAFE_ANCHOR_ID_RE, names_with_more
 
 INDEX_VERSION = 3
+
+# v1.147.0: an ambiguous anchor reference can match every document in the index,
+# so the list that names the matches is bounded. `anchor_match_count` is the
+# uncapped count and the authority; `anchor_candidates_truncated` says whether
+# the list was cut. Every tool that discloses an ambiguity shares this cap.
+ANCHOR_CANDIDATES_CAP = 20
+
+
+def anchor_candidate_fields(cands: list) -> dict:
+    """``anchor_candidates`` capped at ``ANCHOR_CANDIDATES_CAP``, with its flag.
+
+    ``cands`` arrives in document order, so the kept prefix is stable.
+    """
+    return {
+        "anchor_candidates": [
+            {"id": c.get("id", ""), "doc_path": c.get("doc_path", ""),
+             "title": c.get("title", "")}
+            for c in cands[:ANCHOR_CANDIDATES_CAP]
+        ],
+        "anchor_candidates_truncated": len(cands) > ANCHOR_CANDIDATES_CAP,
+    }
+
 
 # How long `delete_index(lock_wait=True)` may wait for a contended retirement
 # record before declaring the lifecycle busy.
@@ -562,24 +584,37 @@ class DocIndex:
         id or alias (a real id is never reinterpreted as an anchor), names no
         anchor, or names exactly one section. Otherwise ``anchor_ambiguous``,
         ``anchor_scope`` (``document`` | ``index``), ``anchor_match_count``,
-        ``anchor_candidates`` (``{id, doc_path, title}`` per match) and a
-        ``warning``. Within a document the first match is still what
-        ``get_section`` resolves to; across documents it resolves to nothing, so
-        the caller's own miss path is where the ambiguity must be reported.
+        ``anchor_candidates`` (``{id, doc_path, title}`` per match, at most
+        ``ANCHOR_CANDIDATES_CAP``), ``anchor_candidates_truncated`` and a
+        ``warning`` that names the first few ids and then ``(+N more)``.
+        ``anchor_match_count`` is the uncapped count and the authority. Within a
+        document the first match is still what ``get_section`` resolves to;
+        across documents it resolves to nothing, so the caller's own miss path
+        is where the ambiguity must be reported.
         """
+        return self._anchor_disclosure(ref, refuse=False)
+
+    def _anchor_disclosure(self, ref: str, refuse: bool) -> Optional[dict]:
         if ref in self._section_index:
             return None
         detail = self.resolve_anchor_detail(ref)
         cands = (detail or {}).get("candidates") or []
         if len(cands) < 2:
             return None
-        listed = ", ".join(c.get("id", "") for c in cands)
+        listed = names_with_more(c.get("id", "") for c in cands)
         if detail.get("section") is None:
             scope = "index"
             warning = (
                 f"Ambiguous anchor reference: {ref} matches {len(cands)} sections "
                 f"in different documents ({listed}); none was chosen. Qualify the "
                 f"reference with a document path, or use a section id."
+            )
+        elif refuse:
+            scope = "document"
+            warning = (
+                f"Ambiguous anchor reference: {ref} is written {len(cands)} times "
+                f"in {cands[0].get('doc_path', '')} ({listed}); nothing was "
+                f"analysed. This answer covers one section, so pass a section id."
             )
         else:
             scope = "document"
@@ -592,11 +627,7 @@ class DocIndex:
             "anchor_ambiguous": True,
             "anchor_scope": scope,
             "anchor_match_count": len(cands),
-            "anchor_candidates": [
-                {"id": c.get("id", ""), "doc_path": c.get("doc_path", ""),
-                 "title": c.get("title", "")}
-                for c in cands
-            ],
+            **anchor_candidate_fields(cands),
             "warning": warning,
         }
 
@@ -607,21 +638,13 @@ class DocIndex:
         ONE section, and a verdict on the first of two same-named headings is
         a verdict on the wrong one half the time. So where ``anchor_disclosure``
         serves the first match, these refuse, and say so: ``error`` and
-        ``warning`` carry the same text, the disclosure keys name every
-        candidate, and a section id selects one. None when the reference is
-        not ambiguous.
+        ``warning`` carry the same text, the disclosure keys name the
+        candidates (capped, with ``anchor_match_count`` as the authority), and a
+        section id selects one. None when the reference is not ambiguous.
         """
-        disclosure = self.anchor_disclosure(ref)
+        disclosure = self._anchor_disclosure(ref, refuse=True)
         if disclosure is None:
             return None
-        if disclosure["anchor_scope"] == "document":
-            cands = disclosure["anchor_candidates"]
-            disclosure["warning"] = (
-                f"Ambiguous anchor reference: {ref} is written "
-                f"{len(cands)} times in {cands[0]['doc_path']} "
-                f"({', '.join(c['id'] for c in cands)}); nothing was analysed. "
-                f"This answer covers one section, so pass a section id."
-            )
         return {"error": disclosure["warning"], **disclosure}
 
     def resolve_anchor_detail(self, ref: str) -> Optional[dict]:

@@ -5,8 +5,18 @@ import os
 import time
 from typing import Optional
 
+from ..parser.sections import names_with_more
 from ..storage import DocStore
+from ..storage.doc_store import ANCHOR_CANDIDATES_CAP, anchor_candidate_fields
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
+
+# v1.147.0: an ambiguous anchor reference returns full bodies for the first
+# ANCHOR_SECTIONS_CAP matches only, and the rest are never read. A reference
+# written in 200 documents would otherwise return 200 bodies in one response.
+# `anchor_match_count` is the uncapped count; `anchor_candidates` names the
+# first ANCHOR_CANDIDATES_CAP matches, including those whose bodies were
+# dropped, so a caller can select one by id.
+ANCHOR_SECTIONS_CAP = 5
 
 
 def _offload():
@@ -49,6 +59,23 @@ def _resolve_each(repo, candidates, verify, strip_boilerplate, compress_code,
         if got.get("section"):
             out.append(got["section"])
     return out
+
+
+def _truncation_note(cands: list) -> str:
+    """The sentence that says how many bodies were read, and names the rest.
+
+    Empty when the cap dropped nothing. ``cands`` is in document order, so the
+    dropped ids are the ones after the first ``ANCHOR_SECTIONS_CAP``.
+    """
+    total = len(cands)
+    if total <= ANCHOR_SECTIONS_CAP:
+        return ""
+    dropped = names_with_more(c.get("id", "") for c in cands[ANCHOR_SECTIONS_CAP:])
+    return (
+        f" Bodies for {ANCHOR_SECTIONS_CAP} of {total} matches are returned and "
+        f"the rest were not read: {dropped}. anchor_candidates lists up to "
+        f"{ANCHOR_CANDIDATES_CAP} matches; select one by its section id."
+    )
 
 
 def get_section(
@@ -99,21 +126,26 @@ def get_section(
     if not sec:
         cands = (anchor_detail or {}).get("candidates") or []
         if cands:
-            # Every match is returned in full. No `section`: across documents
-            # there is no ordering, so naming one of them "the" result would be
-            # arbitrary -- and an arbitrary pick read by a caller that ignores
-            # the warning is the exact failure this design refuses.
+            # The first ANCHOR_SECTIONS_CAP matches are returned in full; the
+            # rest are never read. No `section`: across documents there is no
+            # ordering, so naming one of them "the" result would be arbitrary --
+            # and an arbitrary pick read by a caller that ignores the warning is
+            # the exact failure this design refuses.
             return {
                 "sections": _resolve_each(
-                    repo, cands, verify, strip_boilerplate, compress_code, storage_path
+                    repo, cands[:ANCHOR_SECTIONS_CAP], verify, strip_boilerplate,
+                    compress_code, storage_path,
                 ),
+                "sections_truncated": len(cands) > ANCHOR_SECTIONS_CAP,
                 "anchor_ambiguous": True,
                 "anchor_scope": anchor_detail.get("scope"),
                 "anchor_match_count": len(cands),
+                **anchor_candidate_fields(cands),
                 "warning": (
                     f"{section_id} matches {len(cands)} sections in different "
-                    f"documents; all are returned. Qualify the reference with a "
-                    f"document path to select one."
+                    f"documents."
+                    + (_truncation_note(cands) or " All are returned.")
+                    + " Qualify the reference with a document path to select one."
                 ),
             }
         return {"error": f"Section not found: {section_id}"}
@@ -241,21 +273,25 @@ def get_section(
         "_meta": meta,
     }
     # Duplicate id inside ONE document: the first is served, as a browser would,
-    # and every candidate is named so the caller can see it happened.
+    # and the candidates are named (capped) so the caller can see it happened.
     _cands = (anchor_detail or {}).get("candidates") or []
     if len(_cands) > 1:
         out["anchor_ambiguous"] = True
         out["anchor_scope"] = anchor_detail.get("scope")
         out["anchor_match_count"] = len(_cands)
-        # All of them, in document order. `section` stays the first purely so an
-        # existing consumer sees the shape it always saw; a caller that wants
-        # the truth reads `sections` and needs no second call to get a body.
+        out.update(anchor_candidate_fields(_cands))
+        # The first ANCHOR_SECTIONS_CAP, in document order; `section` is the
+        # first and counts toward the cap. It stays the first purely so an
+        # existing consumer sees the shape it always saw.
         out["sections"] = [result_sec] + _resolve_each(
-            repo, _cands[1:], verify, strip_boilerplate, compress_code, storage_path
+            repo, _cands[1:ANCHOR_SECTIONS_CAP], verify, strip_boilerplate,
+            compress_code, storage_path,
         )
+        out["sections_truncated"] = len(_cands) > ANCHOR_SECTIONS_CAP
         out["warning"] = (
             f"{section_id} is written {len(_cands)} times in "
-            f"{result_sec.get('doc_path', '')}; all matching sections are returned."
+            f"{result_sec.get('doc_path', '')}."
+            + (_truncation_note(_cands) or " All matching sections are returned.")
         )
     _mod = _offload()
     if _mod is not None:

@@ -32,11 +32,17 @@ depending on words, so renaming the H1 would still break every pointer aimed at
 the H2. Unanchored descendants inherit the anchored prefix, so anchoring one
 heading stabilizes its subtree.
 
-**An ambiguous reference returns EVERY match, with its body, in one call.** A
-browser picks one because it scrolls to one place; a JSON response has no such
-constraint. An id written twice yields both sections under `sections`, alongside
-`anchor_ambiguous`, `anchor_scope`, `anchor_match_count` and a `warning`. No
-follow-up call is needed to read the second body.
+**An ambiguous reference returns the matches with their bodies in one call, up
+to a cap.** A browser picks one because it scrolls to one place; a JSON response
+has no such constraint. An id written twice yields both sections under
+`sections`, alongside `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`,
+`anchor_candidates` and a `warning`. No follow-up call is needed to read the
+second body. Bodies are returned for the first 5 matches only
+(`ANCHOR_SECTIONS_CAP`), and the rest are never read: an id shared by 200
+documents is a 200-body response otherwise. `sections_truncated` says whether
+any were left out, `anchor_match_count` stays the uncapped count, and
+`anchor_candidates` names the first 20 matches, including those whose bodies
+were left out, so each of them is one section-id call away.
 
 What differs between the two cases is only which match, if any, is promoted to
 the singular `section` key. Within ONE document, order is author-controlled and
@@ -48,9 +54,15 @@ on the unambiguous path.
 
 **Indexing reports duplicates, because that is when the author can still fix
 them.** `index_local` and `doc_index_repo` responses that index or find nothing
-to change carry `duplicate_anchors` (the document, the id, and every section
+to change carry `duplicate_anchors` (the document, the id, and the sections
 that claimed it; empty when none) and a one-line `duplicate_anchor_warning`.
-The `index-file` command prints the same keys for the file it re-indexed and
+The list is capped at 20 entries (`DUPLICATE_ANCHORS_CAP`), and inside an entry
+`section_ids` and `titles` are capped at 20 (`DUPLICATE_ANCHOR_IDS_CAP`).
+`duplicate_anchors_total` counts every entry, `duplicate_anchors_truncated` says
+whether entries were cut, each entry's `count` counts every heading that claimed
+the id and its `section_ids_truncated` says whether its ids were cut; the
+warning counts the full report. The top-level keys are present on a clean run
+too (`[]`, `0` and `false`). The `index-file` command prints the same keys for the file it re-indexed and
 nothing else. The PostToolUse hook runs that re-index in a background worker
 whose output is discarded, so the warning does not reach the author there.
 `index_local` responses that report an existing handle without reading its
@@ -78,7 +90,10 @@ single-id tools are `get_section_context`, `get_section_excerpt`,
 `get_sections`, `get_section_excerpts` and `get_section_summaries`. All of them
 add `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`,
 `anchor_candidates` (`id`, `doc_path`, `title` for each match) and a `warning`.
-A duplicate inside one document still serves the first match, so the shape is
+The candidates are capped at 20 (`ANCHOR_CANDIDATES_CAP`) in document order, with
+`anchor_candidates_truncated` beside them; `anchor_match_count` is the uncapped
+count and the authority. The `warning` spells out the first 5 ids and then says
+`(+N more)`. A duplicate inside one document still serves the first match, so the shape is
 unchanged. A reference shared across documents is an error that says it is
 ambiguous and lists the candidates. The batch tools put the keys on the entry
 for that id and repeat `anchor_ambiguous` and `warning` at the top level of the

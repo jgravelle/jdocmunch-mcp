@@ -24,7 +24,8 @@ from jdocmunch_mcp.tools.index_local import index_local
 DUP = "# Doc\n\n## First {#foo}\n\nA\n\n## Second {#foo}\n\nB\n"
 CLEAN = "# Doc\n\n## First {#foo}\n\nA\n\n## Second {#bar}\n\nB\n"
 OTHER = "# Other\n\nplain body text\n"
-KEYS = {"duplicate_anchors", "duplicate_anchor_warning"}
+KEYS = {"duplicate_anchors", "duplicate_anchors_total", "duplicate_anchors_truncated",
+        "duplicate_anchor_warning"}
 
 
 def _assert_duplicate(out, doc_path="d.md"):

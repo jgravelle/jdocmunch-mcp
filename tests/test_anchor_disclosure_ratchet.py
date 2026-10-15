@@ -104,9 +104,9 @@ def _carrier(name, out):
 
 
 def _candidates(carrier):
-    # get_section predates the shared helper and lists every match, bodies
-    # included, under `sections`; the rest list {id, doc_path, title} under
-    # `anchor_candidates`.
+    # Every tool lists {id, doc_path, title} under `anchor_candidates`.
+    # `sections` is the fallback for a get_section response, which also
+    # carries the first matches' bodies there.
     return carrier.get("anchor_candidates") or carrier.get("sections") or []
 
 
