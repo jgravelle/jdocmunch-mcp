@@ -20,7 +20,7 @@ from jdocmunch_mcp.parser.sections import (
     WARNING_NAMES_SHOWN,
 )
 from jdocmunch_mcp.storage import DocStore
-from jdocmunch_mcp.storage.doc_store import ANCHOR_CANDIDATES_CAP
+from jdocmunch_mcp.storage.doc_store import ANCHOR_CANDIDATES_CAP, DocIndex
 from jdocmunch_mcp.tools.check_section_delete_safe import check_section_delete_safe
 from jdocmunch_mcp.tools.get_section import ANCHOR_SECTIONS_CAP, get_section
 from jdocmunch_mcp.tools.get_sections import get_sections
@@ -332,6 +332,32 @@ def test_one_duplicate_entry_at_the_cap_drops_nothing(tmp_path):
     assert len(entry["section_ids"]) == DUPLICATE_ANCHOR_IDS_CAP
     assert len(entry["titles"]) == DUPLICATE_ANCHOR_IDS_CAP
     assert entry["section_ids_truncated"] is False
+
+
+def test_cross_document_candidates_are_in_path_order_whatever_the_index_order():
+    # The index keeps documents in discovery order, and that differs by
+    # platform: Linux CI listed doc001.md before doc000.md. The lists are
+    # capped, so the kept prefix must not depend on it. Built directly, in
+    # reverse path order, so this holds on a filesystem that lists sorted too.
+    names = [f"doc{i:03d}.md" for i in range(OVER)]
+    sections = [
+        {"id": f"local/t::{p}::intro#2", "title": "Intro", "level": 2,
+         "doc_path": p, "anchor": "intro"}
+        for p in reversed(names)
+    ]
+    idx = DocIndex(
+        repo="local/t", owner="local", name="t", indexed_at="2026-01-01T00:00:00Z",
+        doc_paths=list(reversed(names)), doc_types={".md": len(names)},
+        sections=sections,
+    )
+
+    detail = idx.resolve_anchor_detail("#intro")
+    assert [c["doc_path"] for c in detail["candidates"]] == names
+
+    disclosure = idx.anchor_disclosure("#intro")
+    assert [c["doc_path"] for c in disclosure["anchor_candidates"]] == (
+        names[:ANCHOR_CANDIDATES_CAP]
+    )
 
 
 def test_clean_index_carries_the_cap_keys_too(tmp_path):

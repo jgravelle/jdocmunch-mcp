@@ -73,7 +73,8 @@ has no such constraint. An id written twice yields both sections under
 `sections`, alongside `anchor_ambiguous`, `anchor_scope`, `anchor_match_count`,
 `anchor_candidates` and a `warning`. No follow-up call is needed to read the
 second body. Bodies are returned for the first 5 matches only
-(`ANCHOR_SECTIONS_CAP`), and the rest are never read: an id shared by 200
+(`ANCHOR_SECTIONS_CAP`), in document-path order and then in order within a
+document, and the rest are never read: an id shared by 200
 documents is a 200-body response otherwise. `sections_truncated` says whether
 any were left out, `anchor_match_count` stays the uncapped count, and
 `anchor_candidates` names the first 20 matches, including those whose bodies

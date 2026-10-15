@@ -675,10 +675,17 @@ class DocIndex:
         while doc_part.startswith("./"):
             doc_part = doc_part[2:]
 
-        groups = [
-            (doc_path, secs) for (doc_path, a), secs in self._anchor_index.items()
-            if a == anchor
-        ]
+        # Sorted by doc_path: the index holds documents in discovery order,
+        # which differs by platform, and the candidate lists are capped, so an
+        # unsorted list would keep a different prefix on each machine.
+        groups = sorted(
+            (
+                (doc_path, secs)
+                for (doc_path, a), secs in self._anchor_index.items()
+                if a == anchor
+            ),
+            key=lambda g: g[0],
+        )
         if not groups:
             return None
 
