@@ -28,7 +28,31 @@ except ImportError:  # pragma: no cover - non-Windows
 
 from ..embeddings import embed_query, cosine_similarity
 
+from ..parser.sections import SAFE_ANCHOR_ID_RE, names_with_more
+
 INDEX_VERSION = 3
+
+# v1.147.0: an ambiguous anchor reference can match every document in the index,
+# so the list that names the matches is bounded. `anchor_match_count` is the
+# uncapped count and the authority; `anchor_candidates_truncated` says whether
+# the list was cut. Every tool that discloses an ambiguity shares this cap.
+ANCHOR_CANDIDATES_CAP = 20
+
+
+def anchor_candidate_fields(cands: list) -> dict:
+    """``anchor_candidates`` capped at ``ANCHOR_CANDIDATES_CAP``, with its flag.
+
+    ``cands`` arrives in document order, so the kept prefix is stable.
+    """
+    return {
+        "anchor_candidates": [
+            {"id": c.get("id", ""), "doc_path": c.get("doc_path", ""),
+             "title": c.get("title", "")}
+            for c in cands[:ANCHOR_CANDIDATES_CAP]
+        ],
+        "anchor_candidates_truncated": len(cands) > ANCHOR_CANDIDATES_CAP,
+    }
+
 
 # How long `delete_index(lock_wait=True)` may wait for a contended retirement
 # record before declaring the lifecycle busy.
@@ -456,6 +480,23 @@ class DocIndex:
     def __post_init__(self) -> None:
         # Build O(1) lookup dict once at load time
         self._section_index: dict = {s["id"]: s for s in self.sections if "id" in s}
+        # v1.147.0: an anchored section also answers to the heading-derived id it
+        # WOULD have had, so a consumer holding the pre-anchor id keeps resolving.
+        # setdefault, never assignment: a real id always wins over an alias that
+        # happens to collide with one.
+        for sec in self.sections:
+            for alias in sec.get("alias_ids") or ():
+                self._section_index.setdefault(alias, sec)
+        # (doc_path, anchor) -> [section, ...] in document order. A list, not a
+        # single section: the same id may be written twice in one document, and
+        # collapsing that here would discard the evidence a caller needs to be
+        # told about it.
+        self._anchor_index: dict = {}
+        for sec in self.sections:
+            anchor = sec.get("anchor")
+            if anchor:
+                key = (sec.get("doc_path", ""), anchor)
+                self._anchor_index.setdefault(key, []).append(sec)
         # Lazy content loader injected by DocStore.load_index. Signature:
         #   loader(doc_path: str, byte_start: int, byte_end: int) -> str
         # Returns "" on failure. Set to None when no loader is available
@@ -511,8 +552,183 @@ class DocIndex:
         return text or ""
 
     def get_section(self, section_id: str) -> Optional[dict]:
-        """Find a section dict by ID (O(1))."""
-        return self._section_index.get(section_id)
+        """Find a section dict by id, alias id, or anchor reference (O(1)).
+
+        Anchor references are the ``doc.md#anchor`` form an author writes in a
+        cross-document link. Resolution is exact-id first, so a real id is never
+        reinterpreted as an anchor ref (real ids contain '#' too).
+        """
+        sec = self._section_index.get(section_id)
+        if sec is not None:
+            return sec
+        return self.resolve_anchor(section_id)
+
+    def resolve_anchor(self, ref: str) -> Optional[dict]:
+        """Resolve ``doc.md#anchor``, ``path/to/doc.md#anchor`` or ``#anchor``.
+
+        The document part may be a suffix of the indexed doc_path, so a pointer
+        written relative to the linking file still resolves. Across documents an
+        ambiguous reference returns None rather than a guess: silently serving a
+        neighbouring section is worse than a miss, because nothing looks wrong.
+        Within ONE document a duplicate id returns the first match, as a renderer
+        does; ``resolve_anchor_detail`` reports the rest.
+        """
+        return (self.resolve_anchor_detail(ref) or {}).get("section")
+
+    def anchor_disclosure(self, ref: str) -> Optional[dict]:
+        """Disclosure for a caller-supplied id that is an AMBIGUOUS anchor ref.
+
+        v1.147.0. ``get_section`` shapes its own ambiguous responses; every other
+        tool that accepts a caller-supplied id calls this instead, so none of
+        them resolves an anchor silently. Returns None when ``ref`` is a stored
+        id or alias (a real id is never reinterpreted as an anchor), names no
+        anchor, or names exactly one section. Otherwise ``anchor_ambiguous``,
+        ``anchor_scope`` (``document`` | ``index``), ``anchor_match_count``,
+        ``anchor_candidates`` (``{id, doc_path, title}`` per match, at most
+        ``ANCHOR_CANDIDATES_CAP``), ``anchor_candidates_truncated`` and a
+        ``warning`` that names the first few ids and then ``(+N more)``.
+        ``anchor_match_count`` is the uncapped count and the authority. Within a
+        document the first match is still what ``get_section`` resolves to;
+        across documents it resolves to nothing, so the caller's own miss path
+        is where the ambiguity must be reported.
+        """
+        return self._anchor_disclosure(ref, refuse=False)
+
+    def _anchor_disclosure(self, ref: str, refuse: bool) -> Optional[dict]:
+        if ref in self._section_index:
+            return None
+        detail = self.resolve_anchor_detail(ref)
+        cands = (detail or {}).get("candidates") or []
+        if len(cands) < 2:
+            return None
+        listed = names_with_more(c.get("id", "") for c in cands)
+        if detail.get("section") is None:
+            scope = "index"
+            warning = (
+                f"Ambiguous anchor reference: {ref} matches {len(cands)} sections "
+                f"in different documents ({listed}); none was chosen. Qualify the "
+                f"reference with a document path, or use a section id."
+            )
+        elif refuse:
+            scope = "document"
+            warning = (
+                f"Ambiguous anchor reference: {ref} is written {len(cands)} times "
+                f"in {cands[0].get('doc_path', '')} ({listed}); nothing was "
+                f"analysed. This answer covers one section, so pass a section id."
+            )
+        else:
+            scope = "document"
+            warning = (
+                f"Ambiguous anchor reference: {ref} is written {len(cands)} times "
+                f"in {cands[0].get('doc_path', '')} ({listed}); the first match was "
+                f"served. Use a section id to select another."
+            )
+        return {
+            "anchor_ambiguous": True,
+            "anchor_scope": scope,
+            "anchor_match_count": len(cands),
+            **anchor_candidate_fields(cands),
+            "warning": warning,
+        }
+
+    def anchor_refusal(self, ref: str) -> Optional[dict]:
+        """An error response for a tool that must NOT pick among duplicates.
+
+        v1.147.0. The deletion preflight and the blast-radius walk answer for
+        ONE section, and a verdict on the first of two same-named headings is
+        a verdict on the wrong one half the time. So where ``anchor_disclosure``
+        serves the first match, these refuse, and say so: ``error`` and
+        ``warning`` carry the same text, the disclosure keys name the
+        candidates (capped, with ``anchor_match_count`` as the authority), and a
+        section id selects one. None when the reference is not ambiguous.
+        """
+        disclosure = self._anchor_disclosure(ref, refuse=True)
+        if disclosure is None:
+            return None
+        return {"error": disclosure["warning"], **disclosure}
+
+    def resolve_anchor_detail(self, ref: str) -> Optional[dict]:
+        """Resolve an anchor reference and report what else matched.
+
+        Returns ``{"section", "candidates", "scope"}``, or None when the
+        reference names no anchor at all. The two ambiguity cases are answered
+        differently, and deliberately:
+
+        * **Within one document** a renderer DOES pick -- duplicate ids are
+          invalid HTML and browsers, like Kramdown, jump to the first. So the
+          first is returned, with every candidate listed alongside it. Matching
+          the rendered document is the right behaviour; doing it silently is
+          not.
+        * **Across documents** (a bare ``#id`` with no document part) there is
+          no current document and therefore nothing licenses a pick. ``section``
+          is None and the candidates are named, so the caller can qualify the
+          reference. Returning a plausible section here is the failure mode this
+          whole design exists to refuse.
+        """
+        if not ref or "#" not in ref:
+            return None
+        doc_part, _, anchor = ref.rpartition("#")
+        anchor = anchor.strip().lower()
+        if not anchor or not SAFE_ANCHOR_ID_RE.match(anchor):
+            return None
+        doc_part = doc_part.strip().replace("\\", "/").strip()
+        while doc_part.startswith("./"):
+            doc_part = doc_part[2:]
+
+        # Sorted by doc_path: the index holds documents in discovery order,
+        # which differs by platform, and the candidate lists are capped, so an
+        # unsorted list would keep a different prefix on each machine.
+        groups = sorted(
+            (
+                (doc_path, secs)
+                for (doc_path, a), secs in self._anchor_index.items()
+                if a == anchor
+            ),
+            key=lambda g: g[0],
+        )
+        if not groups:
+            return None
+
+        if not doc_part:
+            if len(groups) > 1:
+                # Ambiguous ACROSS documents: refuse, but name both.
+                return {
+                    "section": None,
+                    "candidates": [s for _, secs in groups for s in secs],
+                    "scope": "index",
+                }
+            matched = groups[0][1]
+        else:
+            # Most precise match first. Stage 3 is the case where the REFERENCE
+            # is more qualified than the index: a pointer written relative to
+            # the repo root ('docs/guides/x.md#a') against an index rooted at
+            # docs/guides, whose doc_path is just 'x.md'.
+            matched = None
+            for match in (
+                lambda d: d == doc_part,
+                lambda d: d.endswith("/" + doc_part),
+                lambda d: doc_part.endswith("/" + d),
+            ):
+                hits = [(d, secs) for d, secs in groups if match(d)]
+                if len(hits) == 1:
+                    matched = hits[0][1]
+                    break
+                if len(hits) > 1:
+                    return {
+                        "section": None,
+                        "candidates": [s for _, secs in hits for s in secs],
+                        "scope": "index",
+                    }
+            if matched is None:
+                return None
+
+        # One document. First wins, as the renderer does -- and every duplicate
+        # is reported so the caller is never quietly handed one of several.
+        return {
+            "section": matched[0],
+            "candidates": list(matched),
+            "scope": "document",
+        }
 
     def _has_embeddings(self) -> bool:
         """Return True if at least some sections have embeddings stored."""

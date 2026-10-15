@@ -37,6 +37,16 @@ class Section:
     #   metadata.openapi_schema = {name, type, properties, required, ...}
     # Persisted only when non-empty.
     metadata: dict = field(default_factory=dict)
+    # v1.147.0 (#64 follow-on): author-written explicit heading id, e.g.
+    #   ## Some heading {#ex-cache42}
+    # Lowercased, marker-free. Empty when the heading carried none. When set,
+    # it IS this section's slug, so the id stops being a function of the
+    # heading's words and survives a rewording.
+    anchor: str = ""
+    # Ids this section also answers to. Holds the heading-derived id an
+    # anchored section WOULD have had, so a consumer holding the pre-anchor id
+    # keeps resolving after the anchor is added. Persisted only when non-empty.
+    alias_ids: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-safe dict."""
@@ -63,6 +73,10 @@ class Section:
             d["inline_code"] = self.inline_code
         if self.metadata:
             d["metadata"] = self.metadata
+        if self.anchor:
+            d["anchor"] = self.anchor
+        if self.alias_ids:
+            d["alias_ids"] = self.alias_ids
         # Preserve inline content for sections that cannot be recovered via
         # byte-range reads (e.g. v1.18 structured-OpenAPI sections that
         # don't map to the raw spec's byte offsets).
@@ -92,7 +106,38 @@ class Section:
             code_blocks=data.get("code_blocks", []),
             inline_code=data.get("inline_code", []),
             metadata=data.get("metadata", {}),
+            anchor=data.get("anchor", ""),
+            alias_ids=data.get("alias_ids", []),
         )
+
+
+# Explicit heading ids: ``## Heading {#custom-id}`` (Kramdown / PHP Markdown
+# Extra / Python-Markdown attr_list, honoured by Jekyll, MkDocs, Hugo and
+# Docusaurus). Owned here because BOTH the indexer and the broken-link checker
+# must agree on the namespace; they disagreed until v1.147.0, so a link to
+# ``doc.md#custom-id`` validated as live while get_section could not resolve it.
+_EXPLICIT_ID_MARKER_RE = re.compile(r"\s*\{#[^}]*\}\s*$")
+_EXPLICIT_ID_CAPTURE_RE = re.compile(r"\{#(?P<id>[^}]*)\}\s*$")
+_SAFE_ANCHOR_ID_RE = re.compile(r"^[A-Za-z][\w-]*$")
+# Public alias: get_broken_links validates raw HTML anchor ids against the
+# same rule, and a second copy of it is how the two namespaces drifted before.
+SAFE_ANCHOR_ID_RE = _SAFE_ANCHOR_ID_RE
+
+
+def split_explicit_id(title: str) -> tuple:
+    """Split a heading title into (text_without_marker, explicit_id_or_None).
+
+    ``explicit_id`` is returned (lowercased) only when the {#id} payload is a
+    renderer-safe id; an unsafe payload still has its marker stripped from the
+    text so the generated slug is the marker-free text slug, never the polluted
+    'heading-text-custom-id' form (#64)."""
+    m = _EXPLICIT_ID_CAPTURE_RE.search(title)
+    if not m:
+        return title, None
+    raw_id = m.group("id").strip()
+    text = _EXPLICIT_ID_MARKER_RE.sub("", title).rstrip()
+    explicit = raw_id.lower() if _SAFE_ANCHOR_ID_RE.match(raw_id) else None
+    return text, explicit
 
 
 def slugify(text: str) -> str:
@@ -114,11 +159,118 @@ def make_section_id(repo: str, doc_path: str, slug: str, level: int) -> str:
     return f"{repo}::{doc_path}::{slug}#{level}"
 
 
+def duplicate_anchor_report(sections) -> list:
+    """Group explicit anchors written more than once in the SAME document.
+
+    Accepts Section objects or their serialized dicts. Duplicates ACROSS
+    documents are not reported: a fragment is relative to the document that
+    contains it, so the same id in two files is ordinary and flagging it would
+    be a signal that always fires.
+
+    Reported at index time because that is the moment the author can fix it --
+    a duplicate found later shows up as a retrieval returning two sections,
+    which is honest but arrives too late to be cheap.
+    """
+    def _get(sec, field):
+        return sec.get(field, "") if isinstance(sec, dict) else getattr(sec, field, "")
+
+    grouped: dict = {}
+    for sec in sections or ():
+        anchor = _get(sec, "anchor")
+        if anchor:
+            grouped.setdefault((_get(sec, "doc_path"), anchor), []).append(sec)
+
+    report = [
+        {
+            "doc_path": doc_path,
+            "anchor": anchor,
+            "count": len(secs),
+            "section_ids": [_get(x, "id") for x in secs],
+            "titles": [_get(x, "title") for x in secs],
+        }
+        for (doc_path, anchor), secs in grouped.items()
+        if len(secs) > 1
+    ]
+    report.sort(key=lambda r: (r["doc_path"], r["anchor"]))
+    return report
+
+
+# v1.147.0: the duplicate-anchor list rides on every indexing response, and on
+# 1.x a list that ships unbounded cannot be capped later. The cap and the keys
+# that disclose it (`duplicate_anchors_total`, `duplicate_anchors_truncated`,
+# per-entry `section_ids_truncated`) arrive together.
+DUPLICATE_ANCHORS_CAP = 20      # entries in `duplicate_anchors`
+DUPLICATE_ANCHOR_IDS_CAP = 20   # `section_ids` / `titles` inside one entry
+# How many names a human-readable warning spells out before "(+N more)".
+WARNING_NAMES_SHOWN = 5
+
+
+def names_with_more(names, shown: int = WARNING_NAMES_SHOWN) -> str:
+    """``a, b, c (+N more)`` -- the first ``shown`` names, then the remainder's count."""
+    names = list(names)
+    text = ", ".join(names[:shown])
+    return f"{text} (+{len(names) - shown} more)" if len(names) > shown else text
+
+
+def duplicate_anchor_warning(report: list) -> str:
+    """One human-readable line for a duplicate-anchor report, or "" when clean.
+
+    A list of dicts is something a caller must decide to inspect; a sentence is
+    something a model relays and a person reads. Both ship, because the list is
+    what a tool acts on and the sentence is what reaches the human. Counts come
+    from the FULL report, never from the capped list a response carries.
+    """
+    if not report:
+        return ""
+    shown = names_with_more(
+        (f"{r['anchor']} x{r['count']} in {r['doc_path']}" for r in report), 3
+    )
+    return (
+        f"{len(report)} duplicate anchor id(s) written in the same document: "
+        f"{shown}. A reference to one is ambiguous; give each "
+        f"heading a distinct {{#id}} to select one."
+    )
+
+
+def duplicate_anchor_fields(sections) -> dict:
+    """The response keys an indexing payload carries, built from one report.
+
+    ``duplicate_anchors`` is empty and ``duplicate_anchor_warning`` is ``""`` when
+    the sections hold no same-document duplicate. A payload that uses this helper
+    carries every key even when clean, because a signal present only when it
+    fires cannot be told from one that was never computed.
+
+    The list is capped at ``DUPLICATE_ANCHORS_CAP`` entries and each entry's
+    ``section_ids`` / ``titles`` at ``DUPLICATE_ANCHOR_IDS_CAP``. The authority is
+    the totals, not ``len()``: ``duplicate_anchors_total`` counts every entry,
+    each entry's ``count`` counts every heading, and ``*_truncated`` says whether
+    anything was cut. The report is sorted before the cut, so what is kept is
+    stable.
+    """
+    report = duplicate_anchor_report(sections)
+    capped = [
+        {
+            **r,
+            "section_ids": r["section_ids"][:DUPLICATE_ANCHOR_IDS_CAP],
+            "titles": r["titles"][:DUPLICATE_ANCHOR_IDS_CAP],
+            "section_ids_truncated": r["count"] > DUPLICATE_ANCHOR_IDS_CAP,
+        }
+        for r in report[:DUPLICATE_ANCHORS_CAP]
+    ]
+    return {
+        "duplicate_anchors": capped,
+        "duplicate_anchors_total": len(report),
+        "duplicate_anchors_truncated": len(report) > DUPLICATE_ANCHORS_CAP,
+        "duplicate_anchor_warning": duplicate_anchor_warning(report),
+    }
+
+
 def make_hierarchical_slug(
     heading_text: str,
     heading_level: int,
     slug_stack: list,   # mutable list of (level: int, full_path_slug: str)
     used_slugs: dict,   # mutable collision tracker
+    explicit_id: str = "",
 ) -> str:
     """Compute a stable, hierarchical slug for a heading.
 
@@ -140,7 +292,16 @@ def make_hierarchical_slug(
 
     parent_path = slug_stack[-1][1] if slug_stack else ""
     leaf = slugify(heading_text)
-    full_path = f"{parent_path}/{leaf}" if parent_path else leaf
+    derived = f"{parent_path}/{leaf}" if parent_path else leaf
+    if explicit_id:
+        # An author-chosen id is the WHOLE path, not a leaf under the ancestor
+        # chain. The prefix exists only to disambiguate same-named headings;
+        # inheriting it would put an ancestor heading's WORDS back into an id
+        # whose entire purpose is to stop depending on words, so renaming the
+        # H1 would still break every pointer aimed at the H2.
+        full_path = explicit_id
+    else:
+        full_path = derived
     full_path = resolve_slug_collision(full_path, used_slugs)
 
     slug_stack.append((heading_level, full_path))

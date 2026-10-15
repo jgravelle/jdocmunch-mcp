@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..parser import parse_file, preprocess_content, ALL_EXTENSIONS
+from ..parser.sections import duplicate_anchor_fields
 from ..parser.office import (
     OFFICE_EXTENSIONS,
     office_available,
@@ -338,6 +339,10 @@ def index_file(
         "is_new": is_new,
         "sections": len(new_sections),
         "total_sections": len(updated.sections) if updated else 0,
+        # Scoped to the file just written, so an unrelated duplicate elsewhere
+        # in the corpus is not repeated on every re-index. The `index-file` CLI
+        # prints this dict; the PostToolUse hook's worker drops it.
+        **duplicate_anchor_fields(new_sections),
         "exit_code": 0,
         "_meta": {"latency_ms": latency_ms},
     }

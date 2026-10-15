@@ -49,7 +49,12 @@ def get_section_diff(
         return {"error": f"Repo not found: {repo}"}
 
     sec = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not sec:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
 
     indexed_hash = sec.get("content_hash") or ""
@@ -75,7 +80,7 @@ def get_section_diff(
             )
         )
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "section_id": section_id,
         "doc_path": doc_path,
@@ -90,3 +95,6 @@ def get_section_diff(
             "byte_range": [byte_start, byte_end],
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

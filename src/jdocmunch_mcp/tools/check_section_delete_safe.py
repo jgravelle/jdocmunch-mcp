@@ -225,7 +225,8 @@ def check_section_delete_safe(
     Args:
         repo: Repository identifier (owner/name).
         section_id: Stable section ID, format
-            ``{repo}::{doc_path}::{slug}#{level}``.
+            ``{repo}::{doc_path}::{slug}#{level}``. v1.147.0: a ``doc.md#anchor``
+            reference is accepted; an ambiguous one is refused with the candidates.
         transitive_depth: Backlink BFS depth. Default 3.
         recent_edit_days: Days within which a recent edit becomes a
             soft blocker. Default 14.
@@ -241,12 +242,22 @@ def check_section_delete_safe(
     if not index:
         return {"error": f"Repo not found: {repo}"}
 
+    # v1.147.0: a verdict covers ONE section, so an ambiguous `doc.md#anchor`
+    # reference is refused outright rather than answered for the first duplicate.
+    refusal = index.anchor_refusal(section_id)
+    if refusal:
+        return refusal
+
     sec = index.get_section(section_id)
     if not sec:
         return {"error": f"Section not found: {section_id}"}
 
+    # Every channel below reads the STORED id: the slug is parsed out of it, the
+    # tutorial chains are compared against it. A `doc.md#anchor` reference or an
+    # alias would parse to an empty slug and skip the anchor-link channel.
+    stored_id = sec.get("id") or section_id
     doc_path = sec.get("doc_path", "")
-    _, _, slug, _ = _parse_section_id(section_id)
+    _, _, slug, _ = _parse_section_id(stored_id)
     title = sec.get("title", "")
 
     blockers: list[dict] = []
@@ -255,7 +266,7 @@ def check_section_delete_safe(
     # --- Channel 1: tutorial-path membership ----------------------------
     tutorial_memberships: list[dict] = []
     try:
-        tp = get_tutorial_path(repo=repo, section_id=section_id, storage_path=storage_path)
+        tp = get_tutorial_path(repo=repo, section_id=stored_id, storage_path=storage_path)
         if isinstance(tp, dict) and tp.get("chain"):
             chain = tp.get("chain") or []
             # We're the START of the chain → membership counts when chain
@@ -301,7 +312,7 @@ def check_section_delete_safe(
         if not isinstance(tp2, dict) or not tp2.get("chain"):
             continue
         chain_ids = [c.get("section_id") for c in tp2.get("chain", [])]
-        if section_id in chain_ids and chain_ids.index(section_id) > 0:
+        if stored_id in chain_ids and chain_ids.index(stored_id) > 0:
             tutorial_memberships.append({
                 "role": "chain_member",
                 "strategy": tp2.get("strategy", "unknown"),
@@ -353,7 +364,7 @@ def check_section_delete_safe(
         })
 
     # --- Channel 4: recent edit recency ---------------------------------
-    days_ago = _last_edit_days_ago(index, section_id)
+    days_ago = _last_edit_days_ago(index, stored_id)
     evidence["last_edit_days_ago"] = days_ago
     freshness = _freshness_bucket(store, owner, name, index, sec)
     evidence["freshness"] = freshness
@@ -407,17 +418,23 @@ def check_section_delete_safe(
     # (which is the severity order above).
     blockers = blockers[:_MAX_BLOCKERS]
 
+    result = {
+        "repo": f"{owner}/{name}",
+        "section_id": section_id,
+        "title": title,
+        "doc_path": doc_path,
+        "verdict": verdict,
+        "blockers": blockers,
+        "evidence": evidence,
+        "recommended_action": recommended,
+    }
+    if stored_id != section_id:
+        # v1.147.0: the caller sent an anchor reference or an alias; say which
+        # stored section the verdict is about.
+        result["resolved_section_id"] = stored_id
+
     return {
-        "result": {
-            "repo": f"{owner}/{name}",
-            "section_id": section_id,
-            "title": title,
-            "doc_path": doc_path,
-            "verdict": verdict,
-            "blockers": blockers,
-            "evidence": evidence,
-            "recommended_action": recommended,
-        },
+        "result": result,
         "_meta": {
             "latency_ms": int((time.perf_counter() - t0) * 1000),
             "transitive_depth": transitive_depth,

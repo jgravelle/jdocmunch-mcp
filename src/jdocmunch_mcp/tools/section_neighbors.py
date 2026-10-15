@@ -51,8 +51,14 @@ def section_neighbors(
         return {"error": f"Repo not found: {repo}"}
 
     target = index.get_section(section_id)
+    # v1.147.0: an ambiguous `doc.md#anchor` reference is disclosed, never
+    # resolved silently -- on the miss path as well as the hit path.
+    disclosure = index.anchor_disclosure(section_id)
     if not target:
+        if disclosure:
+            return {"error": disclosure["warning"], **disclosure}
         return {"error": f"Section not found: {section_id}"}
+    tid = target.get("id") or section_id
 
     target_doc = target.get("doc_path", "")
     target_start = target.get("byte_start", 0) or 0
@@ -66,7 +72,7 @@ def section_neighbors(
     prev_sec: Optional[dict] = None
     next_sec: Optional[dict] = None
     for i, sec in enumerate(same_doc):
-        if sec.get("id") != section_id:
+        if sec.get("id") != tid:
             continue
         if i > 0:
             prev_sec = same_doc[i - 1]
@@ -81,13 +87,13 @@ def section_neighbors(
     # First child = first section whose parent_id matches the target,
     # ordered by byte_start.
     children = sorted(
-        (s for s in index.sections if s.get("parent_id") == section_id),
+        (s for s in index.sections if s.get("parent_id") == tid),
         key=lambda s: s.get("byte_start", 0) or 0,
     )
     first_child = children[0] if children else None
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return {
+    out = {
         "section_id": section_id,
         "doc_path": target_doc,
         "prev": _handle(prev_sec),
@@ -100,3 +106,6 @@ def section_neighbors(
             "repo": f"{owner}/{name}",
         },
     }
+    if disclosure:
+        out.update(disclosure)
+    return out

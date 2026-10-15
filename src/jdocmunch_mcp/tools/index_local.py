@@ -11,6 +11,7 @@ from typing import Optional
 import pathspec
 
 from ..parser import parse_file, preprocess_content, ALL_EXTENSIONS
+from ..parser.sections import duplicate_anchor_fields
 from ..parser.office import (
     OFFICE_EXTENSIONS,
     OFFICE_MAX_FILE_SIZE,
@@ -2543,6 +2544,10 @@ def index_local(
                     "semantic_search": bool(use_embeddings) and get_provider_name() is not None,
                     "changed": 0, "new": 0, "deleted": 0,
                     **_changes_fields([]),
+                    # v1.147.0: a duplicate already on disk is still there on a
+                    # run that changed nothing, so this payload reports it from
+                    # the stored sections like the other two do.
+                    **duplicate_anchor_fields(updated.sections if updated else []),
                     "_meta": {"latency_ms": latency_ms},
                 }
                 nochange_result.update(derivation_fields)
@@ -2704,6 +2709,7 @@ def index_local(
                 "incremental": True,
                 "changed": len(changed), "new": len(new), "deleted": len(deleted),
                 "section_count": len(updated.sections) if updated else 0,
+                **duplicate_anchor_fields(updated.sections if updated else []),
                 "indexed_at": updated.indexed_at if updated else "",
                 "semantic_search": use_embeddings and get_provider_name() is not None,
                 **_changes_fields(incremental_changes),
@@ -2870,6 +2876,7 @@ def index_local(
             "indexed_at": saved.indexed_at,
             "file_count": len(parsed_files),
             "section_count": len(all_sections),
+            **duplicate_anchor_fields(all_sections),
             "doc_types": doc_types,
             "files": parsed_files[:20],
             "semantic_search": use_embeddings and get_provider_name() is not None,

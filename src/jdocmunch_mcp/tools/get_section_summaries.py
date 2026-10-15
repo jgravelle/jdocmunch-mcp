@@ -51,24 +51,36 @@ def get_section_summaries(
     out: list = []
     found = 0
     missing = 0
+    ambiguous: list = []
     for sid in section_ids:
         if not isinstance(sid, str):
             out.append({"requested_id": sid, "error": "section_id must be a string"})
             missing += 1
             continue
         sec = index.get_section(sid)
+        # v1.147.0: an ambiguous `doc.md#anchor` entry is disclosed on its own
+        # row, never resolved silently.
+        disclosure = index.anchor_disclosure(sid)
+        if disclosure:
+            ambiguous.append(disclosure["warning"])
         if not sec:
-            out.append({"requested_id": sid, "error": f"Section not found: {sid}"})
+            if disclosure:
+                out.append({"requested_id": sid, "error": disclosure["warning"], **disclosure})
+            else:
+                out.append({"requested_id": sid, "error": f"Section not found: {sid}"})
             missing += 1
             continue
         view = {k: v for k, v in sec.items() if k not in ("content", "embedding")}
         byte_start = int(sec.get("byte_start", 0) or 0)
         byte_end = int(sec.get("byte_end", 0) or 0)
         view["byte_length"] = max(0, byte_end - byte_start)
-        out.append({"requested_id": sid, "section": view})
+        entry = {"requested_id": sid, "section": view}
+        if disclosure:
+            entry.update(disclosure)
+        out.append(entry)
         found += 1
 
-    return {
+    resp = {
         "repo": f"{owner}/{name}",
         "sections": out,
         "section_count": len(out),
@@ -79,3 +91,8 @@ def get_section_summaries(
             "indexed_at": index.indexed_at,
         },
     }
+    if ambiguous:
+        # Top level as well as per entry, as get_sections does.
+        resp["anchor_ambiguous"] = True
+        resp["warning"] = " ".join(ambiguous)
+    return resp
