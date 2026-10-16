@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed - a damaged dist-info no longer stops the server from starting (#178)
+
+Reported by [@outoftheblue9](https://github.com/outoftheblue9) while working on #175.
+
+`__version__` caught only `PackageNotFoundError`. A `METADATA` file that is not
+valid UTF-8 makes `importlib.metadata.version` raise `UnicodeDecodeError`, and
+`server.py` reads `__version__` at import, so the server failed to import at
+all. Any other lookup failure now reads as `"unknown"`, the value an uninstalled
+source tree already reports, and is logged at debug level. The runtime check
+from #175 reads the same failure as "no installed version", so the two readers
+agree and no drift is reported between them.
+
 ## [1.147.0] - 2026-10-15 - paged TOC tools, explicit heading ids, a superseded-code disclosure
 
 ### Changed - `get_toc`, `get_toc_tree` and `list_docs` are paged, and refuse a megabyte answer (#176)

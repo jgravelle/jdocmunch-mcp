@@ -30,6 +30,18 @@ def __getattr__(name: str) -> str:
                 _VERSION = version("jdocmunch-mcp")
             except PackageNotFoundError:
                 _VERSION = "unknown"
+            except Exception:
+                # A damaged dist-info (a METADATA that is not valid UTF-8
+                # raises UnicodeDecodeError) must not stop the server from
+                # starting: server.py reads __version__ at import (#178).
+                # runtime_staleness reads the same failure as "no installed
+                # version", so the two stay consistent.
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "installed version unreadable; using 'unknown'", exc_info=True
+                )
+                _VERSION = "unknown"
         return _VERSION
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
