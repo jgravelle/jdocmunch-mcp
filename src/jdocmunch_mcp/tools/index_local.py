@@ -1436,17 +1436,33 @@ def discover_doc_files(
         dirnames[:] = kept_dirs
 
         for filename in filenames:
+            # A file no parser reads is skipped BEFORE the filesystem checks.
+            # Those checks (lstat, resolve) guard a READ, and this file is never
+            # read. On a 128k-file tree with 107k such files they were most of
+            # an 80 s walk. ⚠ Doc and office candidates still meet every check
+            # below in the original order. Only a file that could never be
+            # indexed changes attribution: a non-doc symlink, secret or
+            # out-of-root file now counts as `unsupported_extension`, and none
+            # of those reasons is in `_ACTIONABLE_SKIP_REASONS`.
             file_path = dir_path / filename
+            ext = file_path.suffix.lower()
+            if ext not in OFFICE_EXTENSIONS and ext not in ALL_EXTENSIONS:
+                _count_skip(skip_counts, "unsupported_extension")
+                continue
 
-            if not follow_symlinks and file_path.is_symlink():
+            # One lstat per file. Asking `is_symlink()` twice cost a second
+            # stat on every file in the tree, doc or not.
+            file_is_link = file_path.is_symlink()
+            if not follow_symlinks and file_is_link:
                 _count_skip(skip_counts, "symlink_not_followed")
                 continue
-            if file_path.is_symlink() and is_symlink_escape(root, file_path):
+            if file_is_link and is_symlink_escape(root, file_path):
                 warnings.append(f"Skipped symlink escape: {file_path}")
                 _count_skip(skip_counts, "symlink_escape")
                 continue
 
-            if not validate_path(root, file_path):
+            # `root` was resolved above; the file is still resolved per call.
+            if not validate_path(root, file_path, root_is_resolved=True):
                 warnings.append(f"Skipped path traversal: {file_path}")
                 _count_skip(skip_counts, "path_traversal")
                 continue
@@ -1470,7 +1486,6 @@ def discover_doc_files(
                 _count_skip(skip_counts, "secret_file")
                 continue
 
-            ext = file_path.suffix.lower()
             if ext in OFFICE_EXTENSIONS:
                 if not office_available():
                     # pdf/docx/pptx/epub need the optional markitdown extra

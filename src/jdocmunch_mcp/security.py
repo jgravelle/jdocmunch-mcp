@@ -1,6 +1,8 @@
 """Security utilities for path validation, secret detection, and binary filtering."""
 
+import fnmatch
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -44,11 +46,18 @@ def verify_package_integrity() -> None:
 
 # --- Path Traversal & Symlink Protection ---
 
-def validate_path(root: Path, target: Path) -> bool:
-    """Check that target path resolves within root directory."""
+def validate_path(root: Path, target: Path, *, root_is_resolved: bool = False) -> bool:
+    """Check that target path resolves within root directory.
+
+    ``root_is_resolved``: the caller already holds ``root.resolve()``, so it is
+    not resolved again. A tree walk calls this once per file, and on Windows
+    each ``resolve`` is a ``GetFinalPathNameByHandle`` round trip: re-resolving
+    an unchanged root doubled the cost of the walk's dominant call. The TARGET
+    is still resolved on every call; that resolve is the security check.
+    """
     try:
         resolved = target.resolve()
-        resolved_root = root.resolve()
+        resolved_root = root if root_is_resolved else root.resolve()
         return os.path.commonpath([resolved_root, resolved]) == str(resolved_root)
     except (OSError, ValueError):
         return False
@@ -97,19 +106,19 @@ SECRET_PATTERNS = [
 ]
 
 
+# One alternation of every pattern, so a check is two regex calls instead of
+# 2 x len(SECRET_PATTERNS) fnmatch calls. Equivalent to the per-pattern loop:
+# both inputs are lowercased before matching, no pattern is uppercase, and no
+# pattern names a separator, so ``fnmatch``'s Windows normcase (lowercase,
+# ``/`` to ``\``) cannot change a verdict. A test compares the two.
+_SECRET_RE = re.compile("|".join(fnmatch.translate(p) for p in SECRET_PATTERNS))
+
+
 def is_secret_file(file_path: str) -> bool:
     """Check if a file path matches known secret file patterns."""
-    import fnmatch
-
     name = os.path.basename(file_path).lower()
     path_lower = file_path.lower()
-
-    for pattern in SECRET_PATTERNS:
-        if fnmatch.fnmatch(name, pattern):
-            return True
-        if fnmatch.fnmatch(path_lower, pattern):
-            return True
-    return False
+    return bool(_SECRET_RE.match(name) or _SECRET_RE.match(path_lower))
 
 
 # --- Binary File Detection ---

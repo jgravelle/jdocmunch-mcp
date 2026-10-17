@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Fixed - `index_local` no longer stats and resolves files it will never read
+
+Found while dogfooding: `index_local` on a folder of cloned corpora and
+virtualenvs (about 128,000 files) timed out in the MCP client three times.
+
+The walk ran its filesystem checks on every file before asking whether any
+parser reads it: two `is_symlink()` calls, two `resolve()` calls (the file and,
+again, the already-resolved root) and up to 50 `fnmatch` calls for secret
+names. On Windows each `resolve()` opens a handle, and 107,000 of those files
+were source files and binaries no parser touches. Discovery on that
+folder went from 80.5 s to 18.5 s and found the same 20,816 files.
+
+What changed:
+
+- A file whose extension no parser or office converter reads is counted as
+  `unsupported_extension` before any filesystem check. Doc and office
+  candidates still meet every check in the original order.
+- One `is_symlink()` per file, and the walk passes its resolved root to
+  `validate_path(..., root_is_resolved=True)`. The file itself is still
+  resolved on every call.
+- `is_secret_file` matches one compiled alternation of `SECRET_PATTERNS`
+  instead of looping `fnmatch`. A test compares its verdict with the old loop.
+
+⚠ One attribution change, for files that could never be indexed: a non-doc
+file that is also a symlink, a secret name or outside the root is now counted
+as `unsupported_extension`, and no longer adds a "Skipped secret file" warning.
+On the folder above that removed 27 warnings, all for `.pem`, `.env`-style and
+key files. None of those reasons is actionable, so `coverage_complete` cannot
+change. A doc-extension secret such as `secrets.md` still warns.
+
+⚠ Not fixed here: on the same folder a full index of 10,000 files and 271,585
+sections still spent about 76 s in `save_index` (measured under a profiler), and embedding that many
+sections takes far longer. Those are separate costs.
+
 ### Fixed - a damaged dist-info no longer stops the server from starting (#178)
 
 Reported by [@outoftheblue9](https://github.com/outoftheblue9) while working on #175.
