@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.147.0 |
+**Version:** 1.147.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,24 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.147.1 — discovery skips non-doc files first, and #178
+
+Ours (PR #180), found dogfooding: `index_local` on a 128k-file folder of
+cloned corpora and venvs timed out in the MCP client. `discover_doc_files`
+ran two lstats, two `resolve()`s and up to 50 `fnmatch` calls on every file
+before its extension check; 107k of those files were never readable.
+Extension gate first, one lstat, resolved root passed in, one compiled
+secret regex: 80.5 s → 18.5 s, same 20,816 files. #179 (J's) makes a
+METADATA that is not UTF-8 read as `"unknown"` instead of stopping import.
+
+⚠⚠ **A check that guards a READ belongs after the cheapest test that
+rules the read out.** The order was right for every file we index and
+wrong for the 84% we never open. Moving the gate changed attribution only
+for never-indexable files (now `unsupported_extension`), and none of the
+shifted reasons is actionable. A doc-extension secret still warns.
+⚠ Not fixed: on that folder a full index (10k files, 271k sections) still
+spent ~76 s in `save_index` under a profiler, and embeddings take far longer.
 
 ## v1.147.0 — #176 paging, #174 heading anchors, #175 stale-server disclosure
 
@@ -54,22 +72,7 @@ that rule and the test turns red; keep it that way.
 24-hour rule.** The #171 rebase window was first posted 25 hours out and
 was corrected within a minute.
 
-## v1.145.5 — #169: one path check per document per posting build
-
-@outoftheblue9's #169 (`5b46444`): `PostingIndex.build` runs inside the
-content loader's `sweep()`, so each document's path is resolved once per
-build, not once per section (first search 4,006 → 1,440 ms, their
-measurement on this repo).
-
-⚠⚠ **The memo's LIFETIME is the security argument.** The loader lives on an
-index in the process-wide `_INDEX_CACHE`. A verdict kept past the build
-would let a check made before a symlink appeared authorise a read after it.
-The memo is per `load_index` call, thread-local, and cleared in `finally`.
-Don't move it onto `DocStore` or the index. ⚠ #168's sidecar path builds
-through `RowSet.build`, outside the sweep, so a memoized verdict never feeds
-a persisted row. Keep it that way if the two paths are ever merged.
-
-## Lessons from rotated entries (v1.116.0–v1.145.4, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15)
+## Lessons from rotated entries (v1.116.0–v1.145.5, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -123,6 +126,12 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **A path-check memo's LIFETIME is its security argument** (#169).
+  The posting build's per-document verdict is per `load_index` call,
+  thread-local and cleared in `finally`. Kept on `DocStore` or the cached
+  index, a check made before a symlink appeared would authorise a read
+  after it. #168's `RowSet.build` runs outside that sweep, so no memoized
+  verdict feeds a persisted row. (v1.145.5)
 - ⚠ **`index-file <path>` keeps the explicit-path bypass of the corpus
   rules on purpose** (#115's split). A person naming a file gets it; an
   edit event from the PostToolUse hook is not that, so only the hook
@@ -1042,7 +1051,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.145.4 rotated there 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.145.5 rotated there 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 

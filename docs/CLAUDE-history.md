@@ -21,6 +21,27 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-16 — v1.145.5
+
+Moved out of `CLAUDE.md` on 2026-10-16 when v1.147.1 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries"
+first: the path-check memo's lifetime as its security argument.
+
+## v1.145.5 — #169: one path check per document per posting build
+
+@outoftheblue9's #169 (`5b46444`): `PostingIndex.build` runs inside the
+content loader's `sweep()`, so each document's path is resolved once per
+build, not once per section (first search 4,006 → 1,440 ms, their
+measurement on this repo).
+
+⚠⚠ **The memo's LIFETIME is the security argument.** The loader lives on an
+index in the process-wide `_INDEX_CACHE`. A verdict kept past the build
+would let a check made before a symlink appeared authorise a read after it.
+The memo is per `load_index` call, thread-local, and cleared in `finally`.
+Don't move it onto `DocStore` or the index. ⚠ #168's sidecar path builds
+through `RowSet.build`, outside the sweep, so a memoized verdict never feeds
+a persisted row. Keep it that way if the two paths are ever merged.
+
 ## Rotated 2026-10-15 — v1.145.4
 
 Moved out of `CLAUDE.md` on 2026-10-15 when v1.147.0 became a fourth dated

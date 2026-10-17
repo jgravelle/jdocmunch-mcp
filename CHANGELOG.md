@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-### Fixed - `index_local` no longer stats and resolves files it will never read
+## [1.147.1] - 2026-10-16 - a faster folder walk, and a server that starts with a damaged dist-info
+
+### Fixed - `index_local` no longer stats and resolves files it will never read (#180)
 
 Found while dogfooding: `index_local` on a folder of cloned corpora and
 virtualenvs (about 128,000 files) timed out in the MCP client three times.
