@@ -114,9 +114,11 @@ def test_a_doc_extension_secret_still_warns(mixed_tree):
     assert not any("server.pem" in w for w in warnings)
 
 
-def test_secret_regex_is_built_from_the_pattern_list():
-    # A pattern added to SECRET_PATTERNS must reach the compiled matcher; the
-    # regex is built at import, so this pins that it is derived, not restated.
-    assert security._SECRET_RE.pattern == "|".join(
-        fnmatch.translate(p) for p in SECRET_PATTERNS
-    )
+@pytest.mark.parametrize("pattern", SECRET_PATTERNS)
+def test_every_secret_pattern_reaches_the_compiled_matcher(pattern):
+    # Behavioural, not a string compare: on Python 3.10 `fnmatch.translate`
+    # names its groups from a global counter, so translating the same pattern
+    # twice gives two different strings with one meaning.
+    example = pattern.replace("*", "x")
+    assert fnmatch.fnmatch(example, pattern)
+    assert security._SECRET_RE.match(example)
