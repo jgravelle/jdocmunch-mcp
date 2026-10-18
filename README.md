@@ -307,7 +307,7 @@ Path traversal prevention, symlink escape protection, secret exclusion, file-siz
 
 - **Section retrieval helps least on small files.** If a document has one heading and 40 lines, retrieving the section and reading the file cost about the same.
 - **Semantic search requires an embedding provider.** Without one, search is lexical only — good for identifiers and exact phrasing, weaker for paraphrased questions.
-- **Office formats need the optional `[office]` extra** and are supported for local indexing only.
+- **Office formats need the optional `[office]` extra** and are supported for local indexing only. A scanned (image-only) PDF has no text layer and jDocMunch does not run OCR, so such a file is not indexed. The response names it under `skipped_paths.no_extractable_text`, adds a warning, and reports `coverage_complete: false`.
 - **Freshness is disclosed, not guaranteed.** A section whose source cannot be checked is reported as `unknown` rather than assumed current.
 - **jDocMunch does not parse code.** Symbols, signatures, and call graphs belong to [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp); tabular data belongs to [jdatamunch-mcp](https://github.com/jgravelle/jdatamunch-mcp).
 

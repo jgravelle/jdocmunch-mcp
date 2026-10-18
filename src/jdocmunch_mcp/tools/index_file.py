@@ -12,6 +12,9 @@ from ..parser.office import (
     office_available,
     convert_office,
     office_cache_dir,
+    has_readable_text,
+    no_text_warning,
+    NO_TEXT_REASON,
 )
 from ..storage import DocStore
 from ..storage.doc_store import normalize_commit_sha
@@ -244,6 +247,16 @@ def index_file(
             # Binary office document: convert to Markdown locally
             # (parser/office.py), matching index_local's read leg.
             content = convert_office(path, cache_dir=office_cache_dir(store.base_path))
+            if not has_readable_text(content):
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": NO_TEXT_REASON,
+                    "warning": no_text_warning(rel_path),
+                    "repo": repo_id,
+                    "file": rel_path,
+                    "exit_code": 0,
+                }
         else:
             # newline="" preserves CRLF/CR so offsets/hashes address the real
             # on-disk bytes (#52); Path.read_text lacks newline before 3.13.

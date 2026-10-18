@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed - a scanned PDF is named and left out, never indexed as an empty document
+
+Measured with a synthetic image-only PDF: markitdown converts a PDF with no
+text layer to an empty string without an error, and `index_local` then listed
+it under `files`, kept `coverage_complete: true`, gave no warning, and stored
+one empty section titled with the file name. A search for its contents found
+nothing, and nothing said why.
+
+An office document whose converted text holds no letter or digit is now left
+out of the index. It is counted under a new skip reason,
+`no_extractable_text`, which is actionable: the path is listed in
+`skipped_paths` and `coverage_complete` reads `false`. A warning names the
+file and says jDocMunch does not run OCR. `index_file` skips such a file with
+the same reason. A scan an older version stored as an empty document is
+removed on the next refresh. A PDF with any text layer is unchanged. An
+optional, local OCR extra is a separate proposal and is not part of this
+release.
+
 ## [1.148.0] - 2026-10-17 - searches earn no savings credit, a CLI route for huge folders, a FastEmbed repair
 
 ### Changed - a search earns no savings credit, so your savings figures drop (#181)

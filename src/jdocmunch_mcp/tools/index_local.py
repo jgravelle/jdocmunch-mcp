@@ -18,6 +18,9 @@ from ..parser.office import (
     office_available,
     convert_office,
     office_cache_dir,
+    has_readable_text,
+    no_text_warning,
+    NO_TEXT_REASON,
 )
 from ..retrieval.roles import annotate_sections as _annotate_roles
 from ..retrieval.glossary import extract_glossary, write_terms
@@ -1252,6 +1255,9 @@ _DISCOVERY_HARD_CEILING_MULT = 20  # safety: stop counting at max_files * this
 #: real repo, which is how a disclosure becomes noise nobody reads.
 _ACTIONABLE_SKIP_REASONS = frozenset({
     "oversize", "stat_error", "read_error", "office_extra_not_installed",
+    # A scanned PDF with no text layer: the caller can OCR it elsewhere or
+    # find a text copy, and coverage is not complete without it.
+    "no_extractable_text",
 })
 
 #: Per-reason cap on recorded paths. The COUNT is always exact; this bounds
@@ -2359,6 +2365,16 @@ def index_local(
                     content = convert_office(
                         file_path, cache_dir=office_cache_dir(store.base_path)
                     )
+                    if not has_readable_text(content):
+                        # A scanned PDF: name it and leave it out, never store
+                        # an empty document that reads as indexed.
+                        warnings.append(no_text_warning(rel_path))
+                        if not paths:
+                            _count_skip(
+                                walk_skip_counts, NO_TEXT_REASON,
+                                str(rel_path), walk_skip_paths,
+                            )
+                        continue
                 else:
                     # newline="" preserves CRLF/CR so byte offsets and hashes
                     # address the real on-disk bytes, matching the GitHub leg

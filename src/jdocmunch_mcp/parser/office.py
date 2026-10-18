@@ -36,6 +36,29 @@ _AVAILABLE: Optional[bool] = None
 _CONVERTER = None
 
 
+#: Skip reason for an office document whose conversion yielded no readable
+#: text: in practice a scanned (image-only) PDF, which has no text layer.
+NO_TEXT_REASON = "no_extractable_text"
+
+
+def has_readable_text(text: str) -> bool:
+    """Whether converted text holds anything a reader or a search could use.
+
+    A scanned PDF converts to ``''`` (or only whitespace and form feeds) with
+    no exception. Before this check it was stored as an empty document and
+    counted as indexed, so a search found nothing and nothing said why.
+    """
+    return any(ch.isalnum() for ch in text or "")
+
+
+def no_text_warning(rel_path: str) -> str:
+    return (
+        f"No readable text in {rel_path}: it looks like a scanned or "
+        "image-only document. It was not indexed. jDocMunch does not run "
+        "OCR, so its contents cannot be searched."
+    )
+
+
 def office_available() -> bool:
     """True when the optional markitdown dependency is importable."""
     global _AVAILABLE
