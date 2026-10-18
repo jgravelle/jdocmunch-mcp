@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-### Fixed - a scanned PDF is named and left out, never indexed as an empty document
+## [1.148.1] - 2026-10-18 - a scanned PDF is reported, not indexed empty
+
+### Fixed - a scanned PDF is named and left out, never indexed as an empty document (#188)
 
 Measured with a synthetic image-only PDF: markitdown converts a PDF with no
 text layer to an empty string without an error, and `index_local` then listed

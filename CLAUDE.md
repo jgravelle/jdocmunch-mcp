@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.148.0 |
+**Version:** 1.148.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,24 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.148.1 — a scanned PDF is reported, not indexed empty (#188)
+
+Phase 0 of the 2026-10-18 OCR report (report at the Chief of Staff's notes
+folder, `jdoc-ocr-report.md`). markitdown turns a PDF with no text layer into
+`''` with no error; `index_local` then listed it as indexed, kept
+`coverage_complete: true` and stored one empty section. Now an office
+document whose converted text holds no letter or digit is skipped as
+`no_extractable_text` (actionable), with a warning that jDocMunch runs no
+OCR. Also carries #187, a test-only fix for a Windows/3.10 timing flake.
+
+⚠⚠ **An empty conversion is not an error, so nothing downstream saw it.**
+Check a converter's OUTPUT, not just whether it raised. The OCR extra itself
+(phase 1) waits on J; any bake-off uses public or synthetic scans, never J's
+own financial documents.
+⚠ Measured for the report: RapidOCR's bundled models lost about a third of a
+synthetic English page at confidence 0.97 or more. OCR confidence is not a
+guard on its own.
 
 ## v1.148.0 — L-180 savings, huge folders, FastEmbed repair (#181-#185)
 
@@ -54,27 +72,7 @@ shifted reasons is actionable. A doc-extension secret still warns.
 ⚠ Not fixed: on that folder a full index (10k files, 271k sections) still
 spent ~76 s in `save_index` under a profiler, and embeddings take far longer.
 
-## v1.147.0 — #176 paging, #174 heading anchors, #175 stale-server disclosure
-
-#176 (ours, `98e08fe`): `get_toc`, `get_toc_tree` and `list_docs` take
-`limit` / `offset` and always carry `<unit>_total`, `<unit>_truncated` and
-`next_offset`. Over `JDOCMUNCH_RESPONSE_MAX_BYTES` (1 MiB) they REFUSE with
-`suggested_limit`. jjg chose the ceiling on 2026-10-15 knowing it changes a
-1.x default; `=0` restores the old behaviour. @outoftheblue9's #174
-(`fcec6c7`) makes `{#id}` on a Markdown heading the section's slug, and
-#175 (`5dc211e`) adds `server_build_stale` to every response.
-
-⚠⚠ **A cross-document order that Windows sorts by accident is a
-Linux-only failure.** #174's capped candidate list followed `os.walk`
-order, so only the four Ubuntu jobs went red. Sort before you cap; a cap
-over an unsorted list returns a different subset per platform.
-⚠ **Read two values through ONE producer if they are compared.** #175's
-first draft globbed `jdocmunch_mcp-*.dist-info` while `__version__` came
-from `importlib.metadata`, so a leftover dist-info read as drift forever.
-Its `invalidate_caches()` call is defensive and no test pins it.
-⚠ #178 (open): `__version__` itself raises on an undecodable METADATA.
-
-## Lessons from rotated entries (v1.116.0–v1.146.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17)
+## Lessons from rotated entries (v1.116.0–v1.147.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -128,6 +126,11 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **Sort before you cap a cross-document list** (#174). Its capped
+  candidate list followed `os.walk` order, so only the Ubuntu jobs went red:
+  Windows sorted by accident. ⚠ **Read two compared values through ONE
+  producer** (#175): globbing dist-info while `__version__` came from
+  `importlib.metadata` read a leftover dist-info as drift forever. (v1.147.0)
 - ⚠⚠ **A test can pin a defect as the contract** (#172). `test_v1_73_0.py`
   asserted a custom-named index failed without `--name`, which kept the bug
   green for 73 minor versions. When a fix turns an old test red, read what
@@ -1059,7 +1062,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.146.0 rotated there 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.147.0 rotated there 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 

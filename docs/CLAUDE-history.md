@@ -21,6 +21,33 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-18 — v1.147.0
+
+Moved out of `CLAUDE.md` on 2026-10-18 when v1.148.1 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries"
+first: sort before capping a cross-document list, and read two compared
+values through one producer.
+
+## v1.147.0 — #176 paging, #174 heading anchors, #175 stale-server disclosure
+
+#176 (ours, `98e08fe`): `get_toc`, `get_toc_tree` and `list_docs` take
+`limit` / `offset` and always carry `<unit>_total`, `<unit>_truncated` and
+`next_offset`. Over `JDOCMUNCH_RESPONSE_MAX_BYTES` (1 MiB) they REFUSE with
+`suggested_limit`. jjg chose the ceiling on 2026-10-15 knowing it changes a
+1.x default; `=0` restores the old behaviour. @outoftheblue9's #174
+(`fcec6c7`) makes `{#id}` on a Markdown heading the section's slug, and
+#175 (`5dc211e`) adds `server_build_stale` to every response.
+
+⚠⚠ **A cross-document order that Windows sorts by accident is a
+Linux-only failure.** #174's capped candidate list followed `os.walk`
+order, so only the four Ubuntu jobs went red. Sort before you cap; a cap
+over an unsorted list returns a different subset per platform.
+⚠ **Read two values through ONE producer if they are compared.** #175's
+first draft globbed `jdocmunch_mcp-*.dist-info` while `__version__` came
+from `importlib.metadata`, so a leftover dist-info read as drift forever.
+Its `invalidate_caches()` call is defensive and no test pins it.
+⚠ #178 (open): `__version__` itself raises on an undecodable METADATA.
+
 ## Rotated 2026-10-17 — v1.146.0
 
 Moved out of `CLAUDE.md` on 2026-10-17 when v1.148.0 became a fourth dated
