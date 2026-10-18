@@ -207,6 +207,13 @@ def test_a_real_upgrade_is_still_seen(tmp_path, monkeypatch):
 
     shutil.rmtree(old)
     _write_dist_info(tmp_path, "1.147.0")
+    # A real reinstall lands seconds after the server started; this one lands
+    # in the same clock tick. Windows on Python 3.10 then read the old
+    # directory mtime and served the cached listing, which failed this test
+    # once on CI (PR #181's run). Move the directory's mtime on the way a real
+    # reinstall would, so the test checks what it says and not the clock.
+    st = tmp_path.stat()
+    os.utime(tmp_path, ns=(st.st_atime_ns, st.st_mtime_ns + 2_000_000_000))
     rs._cache["checked_at"] = 0.0  # let the TTL lapse
 
     report = rs.staleness_report()
