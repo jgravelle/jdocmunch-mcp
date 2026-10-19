@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.148.1 |
+**Version:** 1.149.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,33 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.149.0 — the `[ocr]` extra: a modest reader for scanned PDFs
+
+J's go on the 2026-10-18 design (`jdoc-ocr-modest-reader-design.md`, Chief of
+Staff's notes folder), option B twice. `parser/ocr.py` reads PDF pages that
+have no text layer with Tesseract (env path, PATH, default folders incl.
+`%LOCALAPPDATA%\Programs`) or Windows.Media.Ocr. Two keys: `JDOCMUNCH_OCR=1`
+in config AND `ocr=true` / `--ocr`; the choice is stored as
+`DocIndex.ocr_requested` and inherited when `ocr` is None. Sections carry
+`text_source: "ocr"`; the response carries an `ocr` block. 60 s budget per
+MCP call (CLI: none), 50-page cap, per-page cache under `.office_cache/ocr`.
+
+⚠⚠ **Two of the design's six stop conditions tripped, and both are on the
+record.** Condition 1's prose bar was moved after seeing data (J,
+2026-10-19: 8 pages -> the 6 without type specimens; original Tesseract
+0.9489, CER 0.069 / 0.116). The pre-registered table detector failed its one
+test (2 of 3 forms, 1 of 9 prose flagged) and was dropped. **Never restate
+the moved bar as the original one**, and never reintroduce a per-page table
+flag without a new pre-registration.
+⚠ Condition 4 is met only by disclosure: Tesseract took 69 s on a 20-page
+scan against the 60 s budget. The README says so; keep it saying so.
+⚠ `scripts/ocr_regression/` is the manual pre-release check (network + a
+real engine). It is sdist-excluded and guarded by `test_sdist_exclusions`.
+Its data lives in the `.py` so the replay corpus never indexes it.
+⚠ `mark_sections` found the root note by "before the first OCR span" in its
+first draft, which marked a text-layer page 1 as OCR. The test with a mixed
+PDF caught it; keep that test.
 
 ## v1.148.1 — a scanned PDF is reported, not indexed empty (#188)
 
@@ -54,25 +81,7 @@ folder) stops unless the PR reads CLEAN. On 2026-10-17 cla-assistant's
 webhook returned 503 for hours while its homepage returned 200, so judge
 recovery by a redelivery's `status_code`, never the homepage.
 
-## v1.147.1 — discovery skips non-doc files first, and #178
-
-Ours (PR #180), found dogfooding: `index_local` on a 128k-file folder of
-cloned corpora and venvs timed out in the MCP client. `discover_doc_files`
-ran two lstats, two `resolve()`s and up to 50 `fnmatch` calls on every file
-before its extension check; 107k of those files were never readable.
-Extension gate first, one lstat, resolved root passed in, one compiled
-secret regex: 80.5 s → 18.5 s, same 20,816 files. #179 (J's) makes a
-METADATA that is not UTF-8 read as `"unknown"` instead of stopping import.
-
-⚠⚠ **A check that guards a READ belongs after the cheapest test that
-rules the read out.** The order was right for every file we index and
-wrong for the 84% we never open. Moving the gate changed attribution only
-for never-indexable files (now `unsupported_extension`), and none of the
-shifted reasons is actionable. A doc-extension secret still warns.
-⚠ Not fixed: on that folder a full index (10k files, 271k sections) still
-spent ~76 s in `save_index` under a profiler, and embeddings take far longer.
-
-## Lessons from rotated entries (v1.116.0–v1.147.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18)
+## Lessons from rotated entries (v1.116.0–v1.147.1, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18 / 2026-10-19)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -126,6 +135,11 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **A check that guards a READ belongs after the cheapest test that
+  rules the read out.** `discover_doc_files` ran lstats, `resolve()`s and
+  `fnmatch`es before its extension gate, on the 84% of files it never
+  opens (80.5 s -> 18.5 s). Moving a gate can shift skip attribution; check
+  that none of the shifted reasons is actionable. (v1.147.1)
 - ⚠⚠ **Sort before you cap a cross-document list** (#174). Its capped
   candidate list followed `os.walk` order, so only the Ubuntu jobs went red:
   Windows sorted by accident. ⚠ **Read two compared values through ONE
@@ -1062,7 +1076,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.147.0 rotated there 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.147.1 rotated there 2026-10-19, v1.147.0 on 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
@@ -1114,6 +1128,7 @@ Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp
 - `service_installer.py` — (#78) cross-platform login-service installer for `watch` (`jdocmunch-watch`; systemd/launchd/Task Scheduler)
 - `cli/embeddings_offer.py` — (1.143.0) `init`'s offline-embeddings offer: the ONLY module that runs pip or starts a download; owns the benchmark figures the prompt quotes
 - `cli/init.py` — `jdocmunch-mcp init` full onboarding: client detection, config patching, CLAUDE.md policy, Cursor/Windsurf rules, hooks, index; `claude-md` subcommand
+- `parser/ocr.py` — (1.149.0) `[ocr]` extra: two-key gate, Tesseract/Windows OCR detection, PDF page reader, section marking; `index_local._OcrState` holds per-call state
 - `embeddings/` — provider.py (Gemini + OpenAI), cosine_similarity, embed_sections, embed_query
 
 ## CLI Subcommands

@@ -411,6 +411,7 @@ class TestCLIDispatch:
                 extra_ignore_patterns=None,
                 # The tool's own default; --max-files raises it.
                 max_files=10_000,
+                ocr=None, ocr_budget_seconds=0, ocr_max_pages=None,
             )
 
     def test_index_local_rebuild_flag_forces_a_full_pass(self, tmp_path):
@@ -482,7 +483,7 @@ class TestCLIDispatch:
             with pytest.raises(SystemExit) as exc_info:
                 main(["index-file", str(tmp_path / "doc.md")])
             assert exc_info.value.code == 0
-            m.assert_called_once_with(str(tmp_path / "doc.md"), name=None)
+            m.assert_called_once_with(str(tmp_path / "doc.md"), name=None, ocr=None)
 
 
 # ---------------------------------------------------------------------------

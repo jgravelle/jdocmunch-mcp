@@ -45,6 +45,8 @@ CANARY_NAME = "__sdist_exclusion_canary__.txt"
 #: from a LOCAL build -- and a local build is how uploads happen.
 EXCLUDED_DIRS = [
     ".claude",
+    # v1.149.0: the OCR regression script, a manual pre-release check.
+    "scripts/ocr_regression",
 ]
 
 #: Paths that must SURVIVE the build. Without these the test would pass on a

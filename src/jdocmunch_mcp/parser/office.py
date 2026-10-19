@@ -54,8 +54,9 @@ def has_readable_text(text: str) -> bool:
 def no_text_warning(rel_path: str) -> str:
     return (
         f"No readable text in {rel_path}: it looks like a scanned or "
-        "image-only document. It was not indexed. jDocMunch does not run "
-        "OCR, so its contents cannot be searched."
+        "image-only document. It was not indexed. To read scanned pages, "
+        "install the [ocr] extra with Tesseract or Windows OCR available, set "
+        "JDOCMUNCH_OCR=1 in config, and pass ocr=true (README: \"Scanned PDFs\")."
     )
 
 

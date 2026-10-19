@@ -21,6 +21,30 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-19 — v1.147.1
+
+Moved out of `CLAUDE.md` on 2026-10-19 when v1.149.0 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries"
+first: put a read's guard after the cheapest test that rules the read out.
+
+## v1.147.1 — discovery skips non-doc files first, and #178
+
+Ours (PR #180), found dogfooding: `index_local` on a 128k-file folder of
+cloned corpora and venvs timed out in the MCP client. `discover_doc_files`
+ran two lstats, two `resolve()`s and up to 50 `fnmatch` calls on every file
+before its extension check; 107k of those files were never readable.
+Extension gate first, one lstat, resolved root passed in, one compiled
+secret regex: 80.5 s → 18.5 s, same 20,816 files. #179 (J's) makes a
+METADATA that is not UTF-8 read as `"unknown"` instead of stopping import.
+
+⚠⚠ **A check that guards a READ belongs after the cheapest test that
+rules the read out.** The order was right for every file we index and
+wrong for the 84% we never open. Moving the gate changed attribution only
+for never-indexable files (now `unsupported_extension`), and none of the
+shifted reasons is actionable. A doc-extension secret still warns.
+⚠ Not fixed: on that folder a full index (10k files, 271k sections) still
+spent ~76 s in `save_index` under a profiler, and embeddings take far longer.
+
 ## Rotated 2026-10-18 — v1.147.0
 
 Moved out of `CLAUDE.md` on 2026-10-18 when v1.148.1 became a fourth dated

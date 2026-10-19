@@ -1258,6 +1258,9 @@ _ACTIONABLE_SKIP_REASONS = frozenset({
     # A scanned PDF with no text layer: the caller can OCR it elsewhere or
     # find a text copy, and coverage is not complete without it.
     "no_extractable_text",
+    # [ocr] extra: a scanned PDF OCR could not finish in this call's budget,
+    # or whose pages past the cap were not read.
+    "ocr_budget_exhausted", "ocr_pages_capped",
 })
 
 #: Per-reason cap on recorded paths. The COUNT is always exact; this bounds
@@ -1683,6 +1686,126 @@ def _resolve_explicit_paths(
     return files[:max_files], warnings, requested, abs_mtimes
 
 
+class _OcrState:
+    """Per-call OCR bookkeeping for ``index_local`` (the ``[ocr]`` extra).
+
+    Holds the two-key decision, the lazily detected engine, the shared time
+    budget, the per-document results used to mark sections, and the
+    response's ``ocr`` block.
+    """
+
+    def __init__(self, requested: bool, budget_seconds, max_pages, cache_dir):
+        from ..parser import ocr as _ocr
+        self._ocr = _ocr
+        self.requested = bool(requested)
+        self.config_on = _ocr.ocr_enabled_in_config()
+        self.active = _ocr.ocr_active(self.requested)
+        self.budget = _ocr.Budget(
+            _ocr.DEFAULT_BUDGET_SECONDS if budget_seconds is None else budget_seconds
+        )
+        if max_pages is None or int(max_pages) < 0:
+            self.max_pages = _ocr.DEFAULT_MAX_PAGES
+        else:
+            self.max_pages = int(max_pages)
+        self.cache_dir = cache_dir
+        self._engine = None
+        self._engine_reason = None
+        self.results: dict = {}
+        self.capped: list = []
+        self.deferred: list = []
+        self._explained = False
+
+    def wants(self, file_path, content: str) -> bool:
+        if not self.active or not str(file_path).lower().endswith(".pdf"):
+            return False
+        if not has_readable_text(content):
+            return True
+        try:
+            return self._ocr.pdf_has_textless_pages(file_path, self.max_pages)
+        except Exception:
+            return False
+
+    def _get_engine(self):
+        if self._engine is None and self._engine_reason is None:
+            self._engine, self._engine_reason = self._ocr.detect_engine()
+        return self._engine
+
+    def read(self, file_path, rel_path: str, warnings: list):
+        """``(text or None, skip_reason or None)``; None text means no engine."""
+        engine = self._get_engine()
+        if engine is None:
+            return None, None
+        res = self._ocr.ocr_pdf(file_path, engine, self.budget,
+                                max_pages=self.max_pages, cache_dir=self.cache_dir)
+        if not res.complete:
+            self.deferred.append(rel_path)
+            warnings.append(
+                f"OCR for {rel_path} did not finish within this call's time budget. "
+                "Pages read so far are cached and the next call continues. For large "
+                "scanned folders run `jdocmunch-mcp index-local --ocr` from a shell, "
+                "where there is no time budget."
+            )
+            return None, "ocr_budget_exhausted"
+        if res.pages_capped:
+            self.capped.append(rel_path)
+            warnings.append(
+                f"OCR read the first {self.max_pages} pages of {rel_path}; "
+                f"{res.pages_capped} more were not read (raise ocr_max_pages to include them)."
+            )
+        if res.ocr_pages:
+            self.results[rel_path] = res
+            warnings.append(
+                f"OCR read {len(res.ocr_pages)} scanned page(s) of {rel_path} with "
+                f"{res.engine}. OCR text may contain errors, and tables and forms may "
+                "come out scrambled. Sections from it are marked text_source=ocr."
+            )
+        return res.text, None
+
+    def explain_unread(self, warnings: list) -> None:
+        """Why a scanned PDF stayed unread; said once per call."""
+        if self._explained:
+            return
+        if self.requested and not self.config_on:
+            warnings.append(
+                "OCR was requested, but JDOCMUNCH_OCR is not set in config, so no OCR "
+                "ran. Both keys are needed: JDOCMUNCH_OCR=1 in your MCP client's env, "
+                "and ocr=true on the call (or --ocr on the CLI)."
+            )
+            self._explained = True
+        elif self.active and self._engine is None and self._engine_reason:
+            warnings.append(
+                f"OCR is on, but {self._engine_reason}. jDocMunch never installs one."
+            )
+            self._explained = True
+
+    def mark(self, rel_path: str, sections) -> None:
+        res = self.results.get(rel_path)
+        if res is not None and sections:
+            self._ocr.mark_sections(sections, res)
+
+    def attach(self, result: dict) -> None:
+        """State in the response whether OCR was requested, enabled and used."""
+        if not (self.requested or self.results):
+            return
+        block = {
+            "requested": self.requested,
+            "enabled_in_config": self.config_on,
+            "used": bool(self.results),
+            "pages": sum(len(r.ocr_pages) for r in self.results.values()),
+            "documents": sorted(self.results)[:20],
+            "documents_total": len(self.results),
+        }
+        if self._engine is not None:
+            block["engine"] = self._engine.identity
+        elif self._engine_reason and self.active:
+            block["engine_unavailable"] = self._engine_reason
+        if self.results:
+            block["seconds"] = round(sum(r.seconds for r in self.results.values()), 2)
+        if self.deferred:
+            block["deferred_documents"] = sorted(self.deferred)[:20]
+        result["ocr"] = block
+
+
 def index_local(
     path: str,
     name: Optional[str] = None,
@@ -1699,6 +1822,9 @@ def index_local(
     paths: Optional[list] = None,
     worktree_mode: str = "reuse_equivalent",
     legacy_reconcile: Optional[str] = None,
+    ocr: Optional[bool] = None,
+    ocr_budget_seconds: Optional[float] = None,
+    ocr_max_pages: Optional[int] = None,
 ) -> dict:
     """Index a local folder containing documentation files.
 
@@ -1756,6 +1882,19 @@ def index_local(
             ``legacy_reconcile_not_applicable`` and no write. Omitted
             (default): an ordinary refresh stays backfill-only and never
             retires anything.
+        ocr: ``[ocr]`` extra (v1.149.0). True reads scanned PDF pages with an
+            OCR engine already on the machine (Tesseract, or Windows'
+            built-in OCR). It runs only when the user ALSO set
+            ``JDOCMUNCH_OCR=1`` in config: two keys, so an agent can't turn
+            OCR on alone. None (default) inherits this index's stored choice;
+            False turns it off for this index. Every OCR section is marked
+            ``text_source: "ocr"`` and the response's ``ocr`` block says what
+            ran. Nothing is ever installed or downloaded.
+        ocr_budget_seconds: time budget for OCR in this call (default 60 s;
+            0 = unlimited, which the CLI uses). A document that can't finish
+            is skipped as ``ocr_budget_exhausted`` and resumes on the next
+            call from its per-page cache.
+        ocr_max_pages: per-document page cap for OCR (default 50).
 
     Returns:
         Dict with indexing results. Includes a `changes` list with one
@@ -1838,6 +1977,19 @@ def index_local(
             )
             if inherited_patterns:
                 extra_ignore_patterns = inherited_patterns
+
+        # [ocr] extra: the call's key (explicit, or the index's stored choice
+        # when the caller said nothing) AND the user's config key.
+        if ocr is None:
+            ocr_requested = bool(getattr(_prior, "ocr_requested", False)) if _prior is not None else False
+        else:
+            ocr_requested = bool(ocr)
+        ocr_state = _OcrState(
+            requested=ocr_requested,
+            budget_seconds=ocr_budget_seconds,
+            max_pages=ocr_max_pages,
+            cache_dir=office_cache_dir(store.base_path),
+        )
 
         requested_rels: list = []
         # v1.103.0: per-reason skip tally from the full discovery walk — the
@@ -2365,10 +2517,22 @@ def index_local(
                     content = convert_office(
                         file_path, cache_dir=office_cache_dir(store.base_path)
                     )
+                    if ocr_state.wants(file_path, content):
+                        ocr_text, ocr_skip = ocr_state.read(file_path, rel_path, warnings)
+                        if ocr_skip:
+                            if not paths:
+                                _count_skip(
+                                    walk_skip_counts, ocr_skip,
+                                    str(rel_path), walk_skip_paths,
+                                )
+                            continue
+                        if ocr_text is not None:
+                            content = ocr_text
                     if not has_readable_text(content):
                         # A scanned PDF: name it and leave it out, never store
                         # an empty document that reads as indexed.
                         warnings.append(no_text_warning(rel_path))
+                        ocr_state.explain_unread(warnings)
                         if not paths:
                             _count_skip(
                                 walk_skip_counts, NO_TEXT_REASON,
@@ -2392,6 +2556,9 @@ def index_local(
                         walk_skip_counts, "read_error",
                         str(rel_path), walk_skip_paths,
                     )
+        if not paths:
+            for _rel in ocr_state.capped:
+                _count_skip(walk_skip_counts, "ocr_pages_capped", _rel, walk_skip_paths)
 
         final_git_state = (local_git_head(folder_path), False)
         head_sha, source_dirty = stable_local_git_state(initial_git_state, final_git_state)
@@ -2519,6 +2686,9 @@ def index_local(
             # jdoc#81: a full-corpus refresh (re)asserts the durable selection;
             # a subset-scoped `paths` refresh never redefines it.
             selection_kwargs = {} if paths else {"corpus_selection": call_selection}
+            if ocr is not None:
+                # An explicit OCR choice is stored even on a subset refresh.
+                selection_kwargs["ocr_requested"] = ocr_requested
             # jdoc#116: persist the patterns alongside the descriptor. Storing
             # only the digest is what made this defect unfixable-in-place: the
             # descriptor records THAT the corpus was shaped and never HOW, so
@@ -2626,6 +2796,7 @@ def index_local(
                 # would be the one that omits it.
                 nochange_result.update(embedding_rotation_fields)
                 _attach_provider_failure(nochange_result)
+                ocr_state.attach(nochange_result)
                 _attach_reconciliation_outcome(
                     nochange_result, graduating, reconciliation_disclosure
                 )
@@ -2660,6 +2831,7 @@ def index_local(
                 ext = rel_path.rsplit(".", 1)[-1].lower() if "." in rel_path else ""
                 try:
                     sections = parse_file(content, rel_path, repo_id)
+                    ocr_state.mark(rel_path, sections)
                     if sections:
                         new_sections.extend(sections)
                         doc_types[f".{ext}"] = doc_types.get(f".{ext}", 0) + 1
@@ -2820,6 +2992,7 @@ def index_local(
             else:
                 result["truncated"] = False
             _append_long_run_hint(warnings, latency_ms, folder_path, name)
+            ocr_state.attach(result)
             if warnings:
                 result["warnings"] = warnings
             return _finish_legacy_reconcile(result, legacy_ctx)
@@ -2837,6 +3010,7 @@ def index_local(
             ext = f".{rel_path.rsplit('.', 1)[-1].lower()}" if "." in rel_path else ""
             try:
                 sections = parse_file(content, rel_path, repo_id)
+                ocr_state.mark(rel_path, sections)
                 if sections:
                     all_sections.extend(sections)
                     doc_types[ext] = doc_types.get(ext, 0) + 1
@@ -2906,6 +3080,7 @@ def index_local(
             corpus_shape_patterns=sorted(
                 {p for p in (extra_ignore_patterns or []) if isinstance(p, str) and p}
             ),
+            ocr_requested=ocr_requested,
             reconciliation_state=provisional_state,
             coverage=coverage_block or None,
             **lineage_kwargs,
@@ -3057,6 +3232,7 @@ def index_local(
             result["truncated"] = False
 
         _append_long_run_hint(warnings, latency_ms, folder_path, name)
+        ocr_state.attach(result)
         if warnings:
             result["warnings"] = warnings
 

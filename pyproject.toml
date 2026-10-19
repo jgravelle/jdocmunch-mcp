@@ -1,6 +1,6 @@
 [project]
 name = "jdocmunch-mcp"
-version = "1.148.1"
+version = "1.149.0"
 description = "Token-efficient MCP server for structured documentation retrieval via section-level indexing"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +34,22 @@ semantic = ["google-generativeai>=0.8.0"]
 # acquire a native runtime it will never call.
 fastembed = ["fastembed>=0.8.0"]
 office = ["markitdown[pdf,docx,pptx]>=0.1.6"]
+# v1.149.0: reads scanned PDF pages with an OCR engine ALREADY on the machine
+# (Tesseract on PATH or at its default install path, or Windows' built-in
+# OCR). Python bindings only: no engine, model or language pack is installed
+# or downloaded. Off unless JDOCMUNCH_OCR=1 AND the call asks (README).
+ocr = [
+    "jdocmunch-mcp[office]",
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+    "winrt-runtime>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation.Collections>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Globalization>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Graphics.Imaging>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Media.Ocr>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Storage.Streams>=3.0; sys_platform == 'win32'",
+]
 
 [project.scripts]
 jdocmunch-mcp = "jdocmunch_mcp.cli.main:main"
@@ -48,7 +64,9 @@ build-backend = "hatchling.build"
 # fresh clone never has it -- which is why the CI sdist guard grepping for
 # `.claude` cannot fire. It leaks only from a LOCAL build, and a local build
 # is how twine uploads happen.
-exclude = [".claude/"]
+# The OCR regression check (a manual pre-release script that fetches public
+# scans at run time) stays out of the distribution, as designed.
+exclude = [".claude/", "scripts/ocr_regression/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jdocmunch_mcp"]

@@ -92,7 +92,8 @@ def get_section_excerpts(
         full_bytes = len(content.encode("utf-8"))
         excerpt, truncated = _safe_truncate(content, max_bytes)
         excerpt_bytes = len(excerpt.encode("utf-8"))
-        total_full += full_bytes
+        # [ocr] extra: a scanned page's excerpt credits nothing.
+        total_full += excerpt_bytes if sec.get("text_source") == "ocr" else full_bytes
         total_excerpt += excerpt_bytes
         role = (sec.get("metadata") or {}).get("role")
         out.append({

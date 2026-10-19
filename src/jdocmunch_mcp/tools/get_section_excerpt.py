@@ -97,6 +97,8 @@ def get_section_excerpt(
         return {"error": f"Content not available for section: {section_id}"}
 
     full_bytes = len(content.encode("utf-8"))
+    # [ocr] extra: an excerpt of a scanned page's OCR text credits nothing.
+    credit_full = 0 if sec.get("text_source") == "ocr" else full_bytes
     excerpt, truncated = _safe_truncate(content, max_bytes)
     excerpt_bytes = len(excerpt.encode("utf-8"))
 
@@ -110,7 +112,7 @@ def get_section_excerpt(
         "summary": sec.get("summary"),
     }
 
-    tokens_saved = estimate_savings(full_bytes, excerpt_bytes)
+    tokens_saved = estimate_savings(credit_full, excerpt_bytes)
     total = record_savings(tokens_saved, storage_path)
     ca = cost_avoided(tokens_saved, total)
 

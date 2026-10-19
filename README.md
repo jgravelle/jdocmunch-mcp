@@ -157,6 +157,48 @@ The CLI runs the same indexing with no tool timeout. It writes to the same store
 - **Narrowing a folder.** Exclude what you don't need with `--extra-ignore-pattern` (repeatable, the CLI form of `extra_ignore_patterns`), or index only listed files with `--paths-from FILE` (the CLI form of `paths`).
 - **Embeddings.** `--no-embeddings` builds a lexical index first. Run the command again later with `--rebuild` to add embeddings.
 
+### Scanned PDFs
+
+A scanned PDF is a picture of text, with no text layer to index. The optional `[ocr]` extra reads them with an OCR engine **already on your machine**. jDocMunch never installs or downloads an engine, a language pack or a model.
+
+```bash
+pip install "jdocmunch-mcp[ocr]"
+```
+
+**Engines.** jDocMunch looks for one in this order and uses the first that answers:
+
+1. `JDOCMUNCH_TESSERACT_PATH`, if you set it.
+2. `tesseract` on `PATH`.
+3. Tesseract's default install folders: `C:\Program Files\Tesseract-OCR`, the per-user folder under `%LOCALAPPDATA%\Programs`, `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+4. On Windows, the built-in Windows OCR, if an English OCR language is installed (it is on English-language Windows).
+
+`JDOCMUNCH_OCR_ENGINE=tesseract` or `windows` picks one. `JDOCMUNCH_OCR_LANG` passes Tesseract languages that are already installed (default `eng`).
+
+**OCR needs two keys.** It runs only when both are set:
+
+- **You** set `JDOCMUNCH_OCR=1` in your MCP client's `env` block (or your shell, for the CLI).
+- **The call** asks for it: `index_local(ocr=true)`, or `index-local --ocr` on the CLI.
+
+So an agent can't turn OCR on by itself. The choice is stored with the index, and later refreshes and the watcher reuse it; `ocr=false` or `--no-ocr` turns it off. Every response that ran with OCR requested has an `ocr` block saying whether it was enabled in config, whether it was used, how much it read and with which engine.
+
+**What you get.** Each scanned image becomes a `## Page N` section. Every section from OCR is marked `text_source: "ocr"`, with `ocr_engine`, `ocr_pages` and (Tesseract only) `ocr_confidence`. The document opens with a visible note that its text came from OCR, and the response warns about it. Any part of a PDF with its own text layer keeps it. OCR sections earn no token-savings credit.
+
+**How good it is.** On 6 real public-domain scans of printed prose (*Encyclopaedia Britannica* 1911 and *The American Printer*), Tesseract 5.4 found 97.4% of the words with a 2.0% character error rate, and Windows OCR 97.1% and 2.0%. The limits:
+
+- **Tables and forms may come out scrambled.** The words are mostly there, so a search can find them, but columns and fields lose their layout. On two scanned forms, Tesseract found 25% to 80% of the words.
+- **Decorative and black-letter (Gothic) type isn't read.** Neither engine reads it.
+- **Handwriting isn't read.**
+
+**Speed.** Tesseract took 3.4 s per image here (Windows OCR 0.3 s): a 20-image scan took 69 s with Tesseract and 6 s with Windows OCR. An MCP call gives OCR a 60-second budget (`ocr_budget_seconds`), so **with Tesseract, a scan of 20 images or more may not finish in one call.** It's skipped as `ocr_budget_exhausted`. What was already read is cached, and the next call carries on. For a folder of scans, run the CLI, which has no budget:
+
+```bash
+JDOCMUNCH_OCR=1 jdocmunch-mcp index-local --path /path/to/scans --ocr
+```
+
+The first 50 scanned images of a document are read (`ocr_max_pages`, `--ocr-max-pages`); the rest are reported as `ocr_pages_capped`.
+
+**Privacy.** OCR runs on your machine. Tesseract is a local program, and Windows OCR is an on-device Windows API; no page leaves the machine. But OCR turns scans into searchable text. If you OCR tax forms, pay stubs, IDs or medical records, their contents (names, SSNs, account numbers) become readable to any agent that can query this index, and they're stored in the index's text cache on disk. jDocMunch's secret-file rules match file names, not contents, so they won't catch a scanned W-2. Keep such files out of indexed folders, or exclude them with `extra_ignore_patterns`.
+
 ---
 
 ## What you can do
@@ -264,6 +306,14 @@ install whose temp-dir copy works keeps using it and is never re-downloaded.
 `JDOCMUNCH_FASTEMBED_CACHE` names a different folder, and FastEmbed's own
 `FASTEMBED_CACHE_PATH` still takes precedence over both.
 
+**A local OCR program, only if you turn OCR on.** With the `[ocr]` extra,
+`JDOCMUNCH_OCR=1` in config and `ocr=true` on the call (or `--ocr`),
+jDocMunch runs Tesseract as a short-lived child process once per scanned page,
+or calls Windows' on-device OCR. Neither opens a network connection. The text
+is cached under your doc-index directory (`.office_cache/ocr`). Nothing runs in
+the background and nothing is installed. See [Scanned PDFs](#scanned-pdfs) for
+what OCR'd text exposes.
+
 **A child process, when local embeddings are in use.** When the
 `sentence-transformers` provider is active, jDocMunch runs the embedding model
 in a **child process** (`python -m jdocmunch_mcp.embeddings.worker`) instead of
@@ -307,7 +357,8 @@ Path traversal prevention, symlink escape protection, secret exclusion, file-siz
 
 - **Section retrieval helps least on small files.** If a document has one heading and 40 lines, retrieving the section and reading the file cost about the same.
 - **Semantic search requires an embedding provider.** Without one, search is lexical only — good for identifiers and exact phrasing, weaker for paraphrased questions.
-- **Office formats need the optional `[office]` extra** and are supported for local indexing only. A scanned (image-only) PDF has no text layer and jDocMunch does not run OCR, so such a file is not indexed. The response names it under `skipped_paths.no_extractable_text`, adds a warning, and reports `coverage_complete: false`.
+- **Office formats need the optional `[office]` extra** and are supported for local indexing only. A scanned (image-only) PDF has no text layer, so without OCR it is not indexed. The response names it under `skipped_paths.no_extractable_text`, adds a warning, and reports `coverage_complete: false`.
+- **OCR is optional, off by default, and modest.** With the `[ocr]` extra, an engine already on your machine and both keys set, scanned pages are read (see [Scanned PDFs](#scanned-pdfs)). Printed prose reads well. Tables and forms may come out scrambled, and decorative, black-letter and handwritten text isn't read.
 - **Freshness is disclosed, not guaranteed.** A section whose source cannot be checked is reported as `unknown` rather than assumed current.
 - **jDocMunch does not parse code.** Symbols, signatures, and call graphs belong to [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp); tabular data belongs to [jdatamunch-mcp](https://github.com/jgravelle/jdatamunch-mcp).
 

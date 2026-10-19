@@ -435,6 +435,18 @@ def _all_tools() -> list[Tool]:
                         "items": {"type": "string"},
                         "description": "Additional gitignore-style patterns to exclude from indexing"
                     },
+                    "ocr": {
+                        "type": "boolean",
+                        "description": "[ocr] extra (v1.149.0): read scanned PDF pages with an OCR engine already on the machine (Tesseract, or Windows' built-in OCR). Runs ONLY if the user also set JDOCMUNCH_OCR=1 in config; the response's `ocr` block says whether OCR was requested, enabled and used. Omit to keep this index's stored choice; false turns it off. OCR text is marked text_source=\"ocr\" and may contain errors; tables and forms may come out scrambled. Scanned tax forms or IDs become searchable text, so only use it on folders the user meant to have read. Nothing is installed or downloaded."
+                    },
+                    "ocr_budget_seconds": {
+                        "type": "number",
+                        "description": "Time budget for OCR in this call (default 60). A document that can't finish is skipped as ocr_budget_exhausted and resumes on the next call; for big scanned folders use the CLI `index-local --ocr`, which has no budget."
+                    },
+                    "ocr_max_pages": {
+                        "type": "integer",
+                        "description": "Per-document OCR page cap (default 50); pages past it are reported, not read."
+                    },
                     "include_dot_dirs": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -672,7 +684,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="search_sections",
-            description="Search sections by relevance. Hybrid (BM25 lexical + semantic embedding) fusion when the index was built with use_embeddings=true; falls back to lexical-only otherwise. Returns summaries only — use get_section for full content.",
+            description="Search sections by relevance. Hybrid (BM25 lexical + semantic embedding) fusion when the index was built with use_embeddings=true; falls back to lexical-only otherwise. Returns summaries only — use get_section for full content. Results with text_source=\"ocr\" came from a scanned page via OCR and may contain errors.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -843,7 +855,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="get_section",
-            description="Retrieve the full content of a specific section using byte-range reads. Use after identifying section IDs via search_sections or get_toc. Returns this section's own bytes; nested child sections are not included.",
+            description="Retrieve the full content of a specific section using byte-range reads. Use after identifying section IDs via search_sections or get_toc. Returns this section's own bytes; nested child sections are not included. A section with text_source=\"ocr\" was read from a scanned page by OCR: its text may contain errors, and tables or forms in it may be scrambled.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2283,6 +2295,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 paths=arguments.get("paths"),
                 worktree_mode=arguments.get("worktree_mode", "reuse_equivalent"),
                 legacy_reconcile=arguments.get("legacy_reconcile"),
+                ocr=arguments.get("ocr"),
+                ocr_budget_seconds=arguments.get("ocr_budget_seconds"),
+                ocr_max_pages=arguments.get("ocr_max_pages"),
             )
         elif name in ("doc_index_repo", "index_repo"):  # index_repo kept for backward compat
             result = await index_repo(

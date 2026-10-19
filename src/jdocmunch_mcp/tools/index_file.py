@@ -175,6 +175,8 @@ def index_file(
     use_ai_summaries: bool = True,
     name: Optional[str] = None,
     apply_corpus_rules: bool = False,
+    ocr: Optional[bool] = None,
+    ocr_budget_seconds: Optional[float] = None,
 ) -> dict:
     """Re-index a single file within an existing index.
 
@@ -188,6 +190,11 @@ def index_file(
     indexed, which is the watcher's position in jdoc#115. A caller naming the
     file itself (``index-file <path>``) keeps the explicit-path bypass that
     ``index_local(paths=...)`` documents.
+
+    ``ocr`` (``[ocr]`` extra, v1.149.0): as ``index_local``'s. None inherits
+    the owning index's stored choice; OCR still runs only when the user set
+    ``JDOCMUNCH_OCR=1`` in config. ``ocr_budget_seconds``: 60 by default,
+    0 = unlimited (the CLI passes 0).
 
     Returns dict with results.
     """
@@ -241,14 +248,46 @@ def index_file(
                 "exit_code": 0,
             }
 
+    # [ocr] extra: the call's key, or the owning index's stored choice.
+    from .index_local import _OcrState
+    if ocr is None:
+        _owner_index = store.load_index(owner, name)
+        ocr_requested = bool(getattr(_owner_index, "ocr_requested", False))
+    else:
+        ocr_requested = bool(ocr)
+    ocr_state = _OcrState(
+        requested=ocr_requested,
+        budget_seconds=ocr_budget_seconds,
+        max_pages=None,
+        cache_dir=office_cache_dir(store.base_path),
+    )
+    ocr_warnings: list = []
+
     # Read and parse the file
     try:
         if ext in OFFICE_EXTENSIONS:
             # Binary office document: convert to Markdown locally
             # (parser/office.py), matching index_local's read leg.
             content = convert_office(path, cache_dir=office_cache_dir(store.base_path))
+            if ocr_state.wants(path, content):
+                ocr_text, ocr_skip = ocr_state.read(path, rel_path, ocr_warnings)
+                if ocr_skip:
+                    skipped = {
+                        "success": True,
+                        "skipped": True,
+                        "reason": ocr_skip,
+                        "warnings": ocr_warnings,
+                        "repo": repo_id,
+                        "file": rel_path,
+                        "exit_code": 0,
+                    }
+                    ocr_state.attach(skipped)
+                    return skipped
+                if ocr_text is not None:
+                    content = ocr_text
             if not has_readable_text(content):
-                return {
+                ocr_state.explain_unread(ocr_warnings)
+                skipped = {
                     "success": True,
                     "skipped": True,
                     "reason": NO_TEXT_REASON,
@@ -257,6 +296,10 @@ def index_file(
                     "file": rel_path,
                     "exit_code": 0,
                 }
+                if ocr_warnings:
+                    skipped["warnings"] = ocr_warnings
+                ocr_state.attach(skipped)
+                return skipped
         else:
             # newline="" preserves CRLF/CR so offsets/hashes address the real
             # on-disk bytes (#52); Path.read_text lacks newline before 3.13.
@@ -268,6 +311,7 @@ def index_file(
 
     try:
         new_sections = parse_file(content, rel_path, repo_id)
+        ocr_state.mark(rel_path, new_sections)
     except Exception as e:
         return {"success": False, "error": f"Failed to parse: {e}", "exit_code": 2}
 
@@ -342,6 +386,7 @@ def index_file(
         source_dirty=source_dirty,
         sha_certified=sha_certified,
         source_root=str(source_root),
+        **({"ocr_requested": ocr_requested} if ocr is not None else {}),
     )
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
@@ -371,11 +416,18 @@ def index_file(
         result["sha_certified"] = bool(updated.sha_certified)
     if updated and updated.repo_at_sha:
         result["repo_at_sha"] = updated.repo_at_sha
+    if ocr_warnings:
+        result["warnings"] = ocr_warnings
+    ocr_state.attach(result)
     return result
 
 
 def index_file_cli(
-    file_path: str, name: Optional[str] = None, apply_corpus_rules: bool = False
+    file_path: str, name: Optional[str] = None, apply_corpus_rules: bool = False,
+    ocr: Optional[bool] = None,
 ) -> dict:
-    """CLI entry point for index-file subcommand."""
-    return index_file(file_path, name=name, apply_corpus_rules=apply_corpus_rules)
+    """CLI entry point for index-file subcommand. OCR has no time budget here."""
+    return index_file(
+        file_path, name=name, apply_corpus_rules=apply_corpus_rules,
+        ocr=ocr, ocr_budget_seconds=0,
+    )
