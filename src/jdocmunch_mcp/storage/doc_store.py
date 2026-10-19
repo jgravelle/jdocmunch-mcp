@@ -453,6 +453,12 @@ class DocIndex:
     # of a shaped corpus, and a legacy `full+shape:` with no stored patterns is
     # therefore treated as unknown-shape, never as unshaped).
     corpus_shape_patterns: list = field(default_factory=list)
+    # v1.149.0 ([ocr] extra): the user asked for OCR on this index
+    # (index_local(ocr=True) / index-local --ocr). A later call that says
+    # nothing, including a watch refresh, inherits it, so a changed scanned
+    # PDF is read again instead of dropped. OCR still runs only when
+    # JDOCMUNCH_OCR is also set (the two-key gate in parser/ocr.py).
+    ocr_requested: bool = False
     # jdoc#83 (Item B): worktree-translated identity evidence. lineage key =
     # sha1[:16] of the normalized Git common directory (linked-worktree
     # family); relative root = corpus location relative to the worktree top
@@ -1354,7 +1360,16 @@ class DocStore:
         except (OSError, ValueError):
             return 0
         total = 0
-        for doc_path in {p for p in doc_paths if p}:
+        # [ocr] extra: a document whose text came from OCR credits nothing;
+        # an agent could not have read the scanned file it replaces.
+        ocr_docs: set = set()
+        try:
+            idx = self.load_index(owner, name)
+            if idx is not None:
+                ocr_docs = {s.get("doc_path") for s in idx.sections if s.get("text_source") == "ocr"}
+        except Exception:
+            ocr_docs = set()
+        for doc_path in {p for p in doc_paths if p} - ocr_docs:
             try:
                 raw_file = self._safe_content_path(content_dir, doc_path, resolved_root)
                 if raw_file:
@@ -1588,6 +1603,7 @@ class DocStore:
         source_repo: str = "",
         corpus_selection: str = "",
         corpus_shape_patterns: Optional[list] = None,
+        ocr_requested: bool = False,
         worktree_lineage_key: str = "",
         repo_relative_root: str = "",
         corpus_identity_version: int = 0,
@@ -1639,6 +1655,7 @@ class DocStore:
             source_repo=source_repo or "",
             corpus_selection=corpus_selection or "",
             corpus_shape_patterns=list(corpus_shape_patterns or []),
+            ocr_requested=bool(ocr_requested),
             worktree_lineage_key=worktree_lineage_key or "",
             repo_relative_root=repo_relative_root or "",
             corpus_identity_version=int(corpus_identity_version or 0),
@@ -1721,6 +1738,7 @@ class DocStore:
             source_repo=data.get("source_repo", ""),
             corpus_selection=data.get("corpus_selection", ""),
             corpus_shape_patterns=list(data.get("corpus_shape_patterns") or []),
+            ocr_requested=bool(data.get("ocr_requested", False)),
             worktree_lineage_key=data.get("worktree_lineage_key", ""),
             repo_relative_root=data.get("repo_relative_root", ""),
             corpus_identity_version=int(data.get("corpus_identity_version", 0) or 0),
@@ -1896,6 +1914,7 @@ class DocStore:
         source_repo=_UNSET,
         corpus_selection=_UNSET,
         corpus_shape_patterns=_UNSET,
+        ocr_requested=_UNSET,
         worktree_lineage_key=_UNSET,
         repo_relative_root=_UNSET,
         corpus_identity_version=_UNSET,
@@ -2077,6 +2096,11 @@ class DocStore:
                 list(getattr(index, "corpus_shape_patterns", None) or [])
                 if corpus_shape_patterns is _UNSET
                 else list(corpus_shape_patterns or [])
+            ),
+            ocr_requested=(
+                bool(getattr(index, "ocr_requested", False))
+                if ocr_requested is _UNSET
+                else bool(ocr_requested)
             ),
             worktree_lineage_key=(
                 getattr(index, "worktree_lineage_key", "")
@@ -2794,6 +2818,8 @@ class DocStore:
         # trips as empty until it is named HERE. That cost a debugging cycle.
         if getattr(index, "corpus_shape_patterns", None):
             d["corpus_shape_patterns"] = list(index.corpus_shape_patterns)
+        if getattr(index, "ocr_requested", False):
+            d["ocr_requested"] = True
         if getattr(index, "worktree_lineage_key", ""):
             d["worktree_lineage_key"] = index.worktree_lineage_key
         if getattr(index, "repo_relative_root", ""):

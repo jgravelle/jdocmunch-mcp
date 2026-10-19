@@ -214,6 +214,10 @@ def get_section(
             raw_bytes = os.path.getsize(raw_file)
     except OSError:
         pass
+    # [ocr] extra: a section read from a scanned page credits nothing; the
+    # file an agent would otherwise read is an image it could not read.
+    if sec.get("text_source") == "ocr":
+        raw_bytes = 0
     response_bytes = len(content.encode("utf-8"))
     tokens_saved = estimate_savings(raw_bytes, response_bytes)
     total = record_savings(tokens_saved, storage_path)

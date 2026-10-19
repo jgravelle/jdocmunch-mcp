@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+from typing import Optional
 from dataclasses import dataclass, field
 
 
@@ -47,6 +48,13 @@ class Section:
     # anchored section WOULD have had, so a consumer holding the pre-anchor id
     # keeps resolving after the anchor is added. Persisted only when non-empty.
     alias_ids: list = field(default_factory=list)
+    # [ocr] extra (v1.149.0): set on sections built from a scanned page that
+    # an OCR engine read. "ocr" is the only non-empty value. Persisted only
+    # when set, so every pre-OCR index round-trips unchanged.
+    text_source: str = ""
+    ocr_engine: str = ""
+    ocr_pages: list = field(default_factory=list)
+    ocr_confidence: Optional[float] = None
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-safe dict."""
@@ -77,6 +85,14 @@ class Section:
             d["anchor"] = self.anchor
         if self.alias_ids:
             d["alias_ids"] = self.alias_ids
+        if self.text_source:
+            d["text_source"] = self.text_source
+        if self.ocr_engine:
+            d["ocr_engine"] = self.ocr_engine
+        if self.ocr_pages:
+            d["ocr_pages"] = self.ocr_pages
+        if self.ocr_confidence is not None:
+            d["ocr_confidence"] = self.ocr_confidence
         # Preserve inline content for sections that cannot be recovered via
         # byte-range reads (e.g. v1.18 structured-OpenAPI sections that
         # don't map to the raw spec's byte offsets).
@@ -108,6 +124,10 @@ class Section:
             metadata=data.get("metadata", {}),
             anchor=data.get("anchor", ""),
             alias_ids=data.get("alias_ids", []),
+            text_source=data.get("text_source", ""),
+            ocr_engine=data.get("ocr_engine", ""),
+            ocr_pages=data.get("ocr_pages", []),
+            ocr_confidence=data.get("ocr_confidence"),
         )
 
 

@@ -268,6 +268,15 @@ def main(argv: Optional[list] = None):
             "index or for an index saved before roots were stored."
         ),
     )
+    # [ocr] extra (v1.149.0): None = keep the index's stored choice.
+    if_parser.add_argument(
+        "--ocr", dest="ocr", action="store_true", default=None,
+        help="Read scanned PDF pages with an OCR engine already on this machine (Tesseract, or Windows OCR). Runs only if JDOCMUNCH_OCR=1 is also set. The choice is stored on the index; --no-ocr turns it off. Nothing is installed.",
+    )
+    if_parser.add_argument(
+        "--no-ocr", dest="ocr", action="store_false",
+        help="Turn OCR off for this index",
+    )
 
     # --- index-local ---
     il_parser = subparsers.add_parser(
@@ -308,6 +317,23 @@ def main(argv: Optional[list] = None):
             "(equivalent to the MCP tool's incremental=false). Re-parses and "
             "re-embeds every file. Use after changing the embedding model."
         ),
+    )
+    # [ocr] extra (v1.149.0): None = keep the index's stored choice.
+    il_parser.add_argument(
+        "--ocr", dest="ocr", action="store_true", default=None,
+        help="Read scanned PDF pages with an OCR engine already on this machine (Tesseract, or Windows OCR). Runs only if JDOCMUNCH_OCR=1 is also set. The choice is stored on the index; --no-ocr turns it off. Nothing is installed.",
+    )
+    il_parser.add_argument(
+        "--no-ocr", dest="ocr", action="store_false",
+        help="Turn OCR off for this index",
+    )
+    il_parser.add_argument(
+        "--ocr-budget", type=float, default=0, metavar="SECONDS",
+        help="OCR time budget for this run (default 0 = no limit; the MCP tool's default is 60)",
+    )
+    il_parser.add_argument(
+        "--ocr-max-pages", type=_positive_int, default=None, metavar="N",
+        help="OCR at most N pages per document (default 50)",
     )
     # jdoc#108: the MCP tool could express both of these per call and the CLI
     # could express neither, so the documented CLI route sent a private corpus
@@ -480,7 +506,10 @@ def main(argv: Optional[list] = None):
         # compute, then print JSON after leaving the redirect (jdoc#65, same
         # guard the serve path uses for jdoc#19).
         with contextlib.redirect_stdout(sys.stderr):
-            result = index_file_cli(args.file, name=getattr(args, "name", None))
+            result = index_file_cli(
+                args.file, name=getattr(args, "name", None),
+                ocr=getattr(args, "ocr", None),
+            )
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("success") else 1)
         return
@@ -521,6 +550,9 @@ def main(argv: Optional[list] = None):
                     else getattr(args, "extra_ignore_pattern", None)
                 ),
                 max_files=getattr(args, "max_files", 10_000),
+                ocr=getattr(args, "ocr", None),
+                ocr_budget_seconds=getattr(args, "ocr_budget", 0),
+                ocr_max_pages=getattr(args, "ocr_max_pages", None),
             )
         print(json.dumps(result, indent=2))
         return

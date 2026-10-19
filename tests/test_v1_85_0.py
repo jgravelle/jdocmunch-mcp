@@ -32,7 +32,7 @@ class TestCliStdoutGuard:
     def test_index_file_keeps_stdout_clean_json(self, capsys):
         from jdocmunch_mcp.server import main
 
-        def fake_cli(file, name=None):
+        def fake_cli(file, name=None, ocr=None):
             # Simulate sentence-transformers / HF Hub chatter to stdout.
             print("Warning: unauthenticated HF Hub request; Loading weights 100%")
             return {"success": True, "file": file, "sections": 1}

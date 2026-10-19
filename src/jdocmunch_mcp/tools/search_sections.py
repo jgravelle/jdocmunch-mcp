@@ -379,6 +379,10 @@ def search_sections(
         "sections_returned": len(results),
         "search_mode": mode,
     }
+    # [ocr] extra: say at a glance how many results came from OCR text.
+    ocr_hits = sum(1 for r in results if r.get("text_source") == "ocr")
+    if ocr_hits:
+        meta["ocr_results"] = ocr_hits
     if mode == "hybrid":
         meta["semantic_weight"] = semantic_weight
         # jdoc#106: the value alone does not tell a user whether retrieval is

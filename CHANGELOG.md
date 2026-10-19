@@ -2,6 +2,68 @@
 
 ## [Unreleased]
 
+## [1.149.0] - 2026-10-19 - an optional, local reader for scanned PDFs
+
+### Added - the `[ocr]` extra reads scanned PDFs with an engine already on the machine
+
+1.148.1 started naming a scanned PDF instead of indexing it empty. This
+release can read one, when the user wants it to. `pip install
+"jdocmunch-mcp[ocr]"` adds the Python bindings only. The engine is Tesseract,
+if the user installed it (found through `JDOCMUNCH_TESSERACT_PATH`, `PATH`, or
+its default install folders), or Windows' built-in OCR. jDocMunch installs and
+downloads nothing: no engine, no language pack, no model.
+
+**Two keys, so an agent can't turn it on alone.** OCR runs only when the user
+set `JDOCMUNCH_OCR=1` in config AND the call passed `ocr=true` (CLI:
+`--ocr`). A call that asks without the config key gets a warning saying so and
+no OCR. The response's new `ocr` block states whether OCR was requested,
+enabled and used, and which engine read how much. The choice is stored on the
+index (`ocr_requested`), so a refresh, `index_file` or the watcher reuses it;
+`ocr=false` turns it off, and the scans go back to `no_extractable_text`.
+
+**Every OCR section says where it came from.** Sections carry
+`text_source: "ocr"`, `ocr_engine`, `ocr_pages` and, with Tesseract,
+`ocr_confidence`. Each new field is omitted when empty. The document opens
+with a visible note that its text came from OCR and that tables and forms may
+come out scrambled, and the response carries the same warning. Any part of a
+PDF with its own text layer keeps it. OCR sections earn no token-savings
+credit: an agent could not have read the image they replace.
+`search_sections` reports how many results came from OCR in
+`_meta.ocr_results`.
+
+**Budgets.** An MCP call gives OCR 60 seconds (`ocr_budget_seconds`), shared
+by every document. A document that can't finish is skipped as
+`ocr_budget_exhausted`, what it read so far is cached, and the next call
+carries on. Measured here, Tesseract needed 3.4 s per image and a 20-image
+scan took 69 s, so a long scan may need two calls; the CLI
+(`index-local --ocr`) has no budget. The first 50 scanned images of a
+document are read (`ocr_max_pages`); the rest are reported as
+`ocr_pages_capped`. Both new skip reasons are actionable.
+
+**How the shipping bar was set, including where it moved.** The design was
+judged against six conditions, written before any code. Two of them tripped
+and were reported to the maintainer before the work went on:
+
+- **Accuracy.** The bar was mean word recall of at least 0.95 and CER of at
+  most 0.05 on round 3's 8 printed-prose scans. Tesseract 5.4 scored 0.9489,
+  with CER 0.069 and 0.116 on the two scans that hold black-letter and Saxon
+  type specimens; Windows OCR scored 0.9396. **The bar was moved after seeing
+  that data, with the maintainer's approval on 2026-10-19,** to the 6 prose
+  scans without type specimens. There Tesseract scores 0.9744 (CER 0.020) and
+  Windows OCR 0.9709 (0.020). The README says plainly that decorative and
+  black-letter type isn't read.
+- **A table detector.** It was pre-registered, tuned on a separate synthetic
+  set, frozen, and then tested once on the real scans. It missed one of 3
+  forms and flagged one of 9 prose scans, with both engines. On 2026-10-19
+  the maintainer chose to ship without it: every OCR'd document gets the "may
+  come out scrambled" note instead of a flag per image, and there is no
+  ranking down-weight.
+
+`scripts/ocr_regression/` is a manual pre-release check, kept out of the
+distribution. It fetches the 12 public-domain scans at run time, refuses any
+whose hash differs, scores them against pinned Wikisource revisions, and fails
+below the bar.
+
 ## [1.148.1] - 2026-10-18 - a scanned PDF is reported, not indexed empty
 
 ### Fixed - a scanned PDF is named and left out, never indexed as an empty document (#188)

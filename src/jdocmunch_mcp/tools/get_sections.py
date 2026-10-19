@@ -119,6 +119,8 @@ def get_sections(
             except OSError:
                 doc_raw_sizes[doc_path] = 0
         raw_bytes = doc_raw_sizes[doc_path]
+        if sec.get("text_source") == "ocr":
+            raw_bytes = 0  # [ocr] extra: a scanned page credits nothing
 
         response_bytes = len(content.encode("utf-8"))
         tokens_saved = estimate_savings(raw_bytes, response_bytes)
