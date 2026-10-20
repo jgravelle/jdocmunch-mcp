@@ -31,6 +31,7 @@ import logging
 import os
 import signal
 import stat
+import subprocess
 import sys
 from contextlib import aclosing
 from pathlib import Path
@@ -313,13 +314,105 @@ def _corpus_filters(root: str, name: str, storage_path: str):
         # and load_index("local", "local/<name>") found nothing, so the stored
         # patterns were silently skipped on every watcher refresh.
         bare = normalize_local_index_name(name, name)
-        idx = DocStore(base_path=storage_path).load_index("local", bare)
-        patterns = list(getattr(idx, "corpus_shape_patterns", None) or []) if idx else []
+        store = DocStore(base_path=storage_path)
+        patterns = _summary_shape_patterns(store, bare)
+        if patterns is None:
+            # No summary, or one written before it carried the key: read the
+            # monolith, as before.
+            idx = store.load_index("local", bare)
+            patterns = list(getattr(idx, "corpus_shape_patterns", None) or []) if idx else []
         if patterns:
             extra_spec = pathspec.PathSpec.from_lines("gitignore", patterns)
     except Exception:
         logger.debug("watch: shape-pattern load failed for %s", name, exc_info=True)
     return gitignore_spec, extra_spec
+
+
+def _summary_shape_patterns(store, bare: str) -> Optional[list]:
+    """``corpus_shape_patterns`` from the index's summary sidecar, or None.
+
+    jdoc#189: reading them from the monolith parsed the whole index once per
+    batch (80 MB on the reporter's largest) and parked it in this process's
+    index cache. The jdoc#77 summary is written under the same lock as the
+    monolith, so it can't lag it. None means "read the monolith instead".
+    """
+    try:
+        import json
+
+        path = store._summary_path("local", bare)
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or "corpus_shape_patterns" not in data:
+        return None
+    return [p for p in (data.get("corpus_shape_patterns") or []) if isinstance(p, str)]
+
+
+def _watch_inprocess() -> bool:
+    """``JDOCMUNCH_WATCH_INPROCESS=1`` runs batches in this process (jdoc#189)."""
+    return os.environ.get("JDOCMUNCH_WATCH_INPROCESS", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _no_window_kwargs() -> dict:
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
+
+
+def _reindex_batch_in_child(job: dict) -> dict:
+    """Run one batch through ``python -m jdocmunch_mcp.watch_batch``.
+
+    The child pays the batch's peak memory and returns it to the OS on exit,
+    so the watcher stays near its baseline (jdoc#189). It inherits this
+    environment and opens no network connection beyond what indexing itself
+    does.
+    """
+    import json
+
+    # stdin is an explicit PIPE that carries the job, never this process's
+    # own stdin (jcm#392); the test guard lists this module for that reason.
+    with subprocess.Popen(
+        [sys.executable, "-m", "jdocmunch_mcp.watch_batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **_no_window_kwargs(),
+    ) as child:
+        out, err = child.communicate(json.dumps(job))
+    proc = subprocess.CompletedProcess(child.args, child.returncode, out, err)
+    lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    try:
+        result = json.loads(lines[-1]) if lines else {}
+    except ValueError:
+        result = {}
+    if not isinstance(result, dict) or not result:
+        tail = (proc.stderr or "").strip()[-400:]
+        result = {"success": False,
+                  "error": f"watch batch exited {proc.returncode} with no result: {tail}"}
+    elif proc.returncode != 0:
+        result.setdefault("success", False)
+    return result
+
+
+def _reindex_batch(root: str, name: str, paths: list, storage_path: str,
+                   use_ai_summaries: bool) -> dict:
+    """Re-index one batch, in a child process unless JDOCMUNCH_WATCH_INPROCESS."""
+    job = {"root": root, "name": name, "paths": list(paths),
+           "storage_path": storage_path, "use_ai_summaries": bool(use_ai_summaries)}
+    if not _watch_inprocess():
+        return _reindex_batch_in_child(job)
+    from .tools.index_local import index_local
+
+    return index_local(
+        path=root, name=name, paths=list(paths), storage_path=storage_path,
+        use_ai_summaries=bool(use_ai_summaries), incremental=True,
+    )
 
 
 def _excluded_from_corpus(abs_path: str, root: str, gitignore_spec, extra_spec) -> bool:
@@ -358,8 +451,6 @@ async def _handle_changes(
     quiet: bool,
     log_file_handle: Optional[IO],
 ) -> None:
-    from .tools.index_local import index_local
-
     by_root: "dict[str, set[str]]" = {}
     for _change, path in changes:
         try:
@@ -392,15 +483,14 @@ async def _handle_changes(
         try:
             # Subset refresh (jdoc#31): only the changed paths are re-indexed;
             # unlisted docs are never pruned, a listed-but-deleted file deletes.
-            await asyncio.to_thread(
-                index_local,
-                path=root,
-                name=name,
-                paths=sorted(paths),
-                storage_path=storage_path,
-                use_ai_summaries=use_ai_summaries,
-                incremental=True,
+            result = await asyncio.to_thread(
+                _reindex_batch, root, name, sorted(paths), storage_path, use_ai_summaries,
             )
+            if isinstance(result, dict) and result.get("success") is False:
+                # An error result must not be logged as a re-index; noted by
+                # @DreDay4u in #189's follow-up.
+                logger.warning("reindex failed for %s: %s", name, result.get("error"))
+                continue
             _watcher_output(
                 f"jdocmunch-mcp watch: re-indexed {len(paths)} file(s) in {name}",
                 quiet=quiet, log_file_handle=log_file_handle,

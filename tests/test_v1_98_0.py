@@ -89,6 +89,9 @@ class TestHandleChanges:
         monkeypatch.setattr(
             "jdocmunch_mcp.tools.index_local.index_local", fake_index_local
         )
+        # jdoc#189: batches run in a child process by default, where this stub
+        # can't reach. Grouping is the subject here, so use the in-process path.
+        monkeypatch.setenv("JDOCMUNCH_WATCH_INPROCESS", "1")
 
         root = str(tmp_path)
         roots_map = {root: "local/mydocs"}

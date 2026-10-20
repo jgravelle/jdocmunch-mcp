@@ -48,6 +48,11 @@ _INTENTIONAL_STDIN_PIPE = {
         "jdoc#118: the sentence-transformers child is driven over a private "
         "NDJSON pipe on its stdin, and the parent bounds and kills it."
     ),
+    "watch.py": (
+        "jdoc#189: each watch batch's job is written to the child's stdin and "
+        "the pipe is closed by communicate(); the child never reads fd 0 of "
+        "the watcher."
+    ),
 }
 
 

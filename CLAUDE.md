@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.149.0 |
+**Version:** 1.150.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
@@ -9,6 +9,28 @@
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
+
+## v1.150.0 — #189: watch batches in a child, a byte budget for the index cache
+
+@DreDay4u's #189 (measured on Linux, 20+ indexes). Their PRs #190 / #191
+were never signed under the CLA; the 24h default ran out 2026-10-19 23:34 UTC,
+so we wrote both from the issue and J's review notes, crediting them by name.
+`watch_batch.py` runs one batch per child (`watch._reindex_batch`;
+`JDOCMUNCH_WATCH_INPROCESS=1` restores the old path). `_corpus_filters` reads
+`corpus_shape_patterns` from the summary sidecar. `_INDEX_CACHE` gained
+`_INDEX_CACHE_ESTIMATES` and `JDOCMUNCH_INDEX_CACHE_MAX_BYTES` (512 MiB).
+
+⚠⚠ **A measurement needs a control saying the thing ran.** The first
+FastEmbed timing (1.4 s per child batch) came from a child whose model file
+was missing: `embedding_provider_error` was set and nothing was embedded.
+The valid figure (1.7 s, `embedded_sections: 41`) used Chroma's local copy
+of the same model under `HF_HUB_OFFLINE=1`, so nothing was downloaded.
+⚠ **The byte total is summed from the keys cached, never a running
+counter.** 10+ test files call `_INDEX_CACHE.clear()` directly; a counter
+would drift there and under racing puts. A test pins it.
+⚠ **When the seam moves, the stub follows** (again): `test_v1_98_0`
+stubbed `index_local`, which a child process can't see. It now sets
+`JDOCMUNCH_WATCH_INPROCESS=1`, since grouping is its subject.
 
 ## v1.149.0 — the `[ocr]` extra: a modest reader for scanned PDFs
 
@@ -55,33 +77,7 @@ own financial documents.
 synthetic English page at confidence 0.97 or more. OCR confidence is not a
 guard on its own.
 
-## v1.148.0 — L-180 savings, huge folders, FastEmbed repair (#181-#185)
-
-Five PRs in one release, merged through `release/1.148.0` with merge
-commits so J clicked once. #181 (J's ruling, the suite-wide L-180):
-`search_sections` reports `tokens_saved: 0` and adds nothing to the running
-or shared total; every savings figure carries `savings_basis: "modeled"`.
-#182: the content mirror resolves its root once per save. #183 / #185
-(ruling A): slow or capped `index_local` calls name the CLI, and
-`index-local --max-files N` exists. #184 (ruling B): `index_local` adds
-`embedding_provider_error` when `semantic_search` is true but nothing was
-embedded, and `init` repairs a broken FastEmbed model only on consent, into
-`~/.cache/jdocmunch-mcp/fastembed`.
-
-⚠⚠ **Profile the hot path WITHOUT cProfile before choosing a fix.** It
-inflated pure-Python code about 7x: `json.dump` read as 23 s and measured
-3.5 s; the posting build read as 27 s and measured 12.7 s. Wall-clock
-wrappers around each phase gave the real split.
-⚠⚠ **`semantic_search` means "a provider is configured", not "vectors
-exist".** A bare `except` in `_get_provider` hid a missing `model.onnx`
-for as long as the temp dir stayed empty. `embedding_provider_error` is the
-new key; never change the old one's meaning on 1.x.
-⚠ The release script (`release_jdoc.py`, in the Chief of Staff's notes
-folder) stops unless the PR reads CLEAN. On 2026-10-17 cla-assistant's
-webhook returned 503 for hours while its homepage returned 200, so judge
-recovery by a redelivery's `status_code`, never the homepage.
-
-## Lessons from rotated entries (v1.116.0–v1.147.1, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18 / 2026-10-19)
+## Lessons from rotated entries (v1.116.0–v1.148.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18 / 2026-10-19 / 2026-10-20)
 
 ⚠⚠ **These outlived the releases that produced them.** Each line names the
 version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
@@ -135,6 +131,10 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **`semantic_search` means "a provider is configured", not "vectors
+  exist".** A bare `except` hid a missing `model.onnx`; `embedding_provider_error`
+  is the key that says so. Profile without cProfile first: it inflated
+  pure-Python code about 7x. (v1.148.0)
 - ⚠⚠ **A check that guards a READ belongs after the cheapest test that
   rules the read out.** `discover_doc_files` ran lstats, `resolve()`s and
   `fnmatch`es before its extension gate, on the 84% of files it never
@@ -1076,7 +1076,7 @@ path ([[feedback_fixture_query_corpus_pollution]]).
 ## Release history
 
 ⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.147.1 rotated there 2026-10-19, v1.147.0 on 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
+older is in `docs/CLAUDE-history.md`** — v1.148.0 rotated there 2026-10-20, v1.147.1 on 2026-10-19, v1.147.0 on 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
 v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
 them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
 
@@ -1128,6 +1128,7 @@ Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp
 - `service_installer.py` — (#78) cross-platform login-service installer for `watch` (`jdocmunch-watch`; systemd/launchd/Task Scheduler)
 - `cli/embeddings_offer.py` — (1.143.0) `init`'s offline-embeddings offer: the ONLY module that runs pip or starts a download; owns the benchmark figures the prompt quotes
 - `cli/init.py` — `jdocmunch-mcp init` full onboarding: client detection, config patching, CLAUDE.md policy, Cursor/Windsurf rules, hooks, index; `claude-md` subcommand
+- `watch_batch.py` — (1.150.0, #189) one watch batch per child interpreter; `watch._reindex_batch` launches it
 - `parser/ocr.py` — (1.149.0) `[ocr]` extra: two-key gate, Tesseract/Windows OCR detection, PDF page reader, section marking; `index_local._OcrState` holds per-call state
 - `embeddings/` — provider.py (Gemini + OpenAI), cosine_similarity, embed_sections, embed_query
 

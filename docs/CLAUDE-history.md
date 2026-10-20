@@ -21,6 +21,39 @@ should already be in the brief; if it is not, that is the bug.
 this file.** Those are the only facts in it with a guaranteed expiry date, and
 several entries below carry them. Run the query.
 
+## Rotated 2026-10-20 — v1.148.0
+
+Moved out of `CLAUDE.md` on 2026-10-20 when v1.150.0 became a fourth dated
+section. What it earned was lifted into "Lessons from rotated entries"
+first: `semantic_search` is not evidence of vectors, and cProfile inflates
+pure-Python cost.
+
+## v1.148.0 — L-180 savings, huge folders, FastEmbed repair (#181-#185)
+
+Five PRs in one release, merged through `release/1.148.0` with merge
+commits so J clicked once. #181 (J's ruling, the suite-wide L-180):
+`search_sections` reports `tokens_saved: 0` and adds nothing to the running
+or shared total; every savings figure carries `savings_basis: "modeled"`.
+#182: the content mirror resolves its root once per save. #183 / #185
+(ruling A): slow or capped `index_local` calls name the CLI, and
+`index-local --max-files N` exists. #184 (ruling B): `index_local` adds
+`embedding_provider_error` when `semantic_search` is true but nothing was
+embedded, and `init` repairs a broken FastEmbed model only on consent, into
+`~/.cache/jdocmunch-mcp/fastembed`.
+
+⚠⚠ **Profile the hot path WITHOUT cProfile before choosing a fix.** It
+inflated pure-Python code about 7x: `json.dump` read as 23 s and measured
+3.5 s; the posting build read as 27 s and measured 12.7 s. Wall-clock
+wrappers around each phase gave the real split.
+⚠⚠ **`semantic_search` means "a provider is configured", not "vectors
+exist".** A bare `except` in `_get_provider` hid a missing `model.onnx`
+for as long as the temp dir stayed empty. `embedding_provider_error` is the
+new key; never change the old one's meaning on 1.x.
+⚠ The release script (`release_jdoc.py`, in the Chief of Staff's notes
+folder) stops unless the PR reads CLEAN. On 2026-10-17 cla-assistant's
+webhook returned 503 for hours while its homepage returned 200, so judge
+recovery by a redelivery's `status_code`, never the homepage.
+
 ## Rotated 2026-10-19 — v1.147.1
 
 Moved out of `CLAUDE.md` on 2026-10-19 when v1.149.0 became a fourth dated

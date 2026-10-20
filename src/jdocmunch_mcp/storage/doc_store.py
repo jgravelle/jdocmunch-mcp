@@ -227,6 +227,18 @@ def _with_index_lock(method):
 # Bounded to prevent leaks in long-running MCP servers.
 _INDEX_CACHE_MAXSIZE = 8
 _INDEX_CACHE: "OrderedDict[tuple, DocIndex]" = OrderedDict()
+# jdoc#189: the entry count alone let a serve process hold gigabytes, since a
+# parsed index is several times its monolith's size. Each entry also carries
+# an estimated footprint, and inserts evict LRU entries past a byte budget.
+# The total is SUMMED over the keys still cached, never kept as a running
+# counter, so a direct `_INDEX_CACHE.clear()` or a racing put can't skew it.
+_INDEX_CACHE_ESTIMATES: dict = {}
+_INDEX_CACHE_LOCK = threading.RLock()
+#: Parsed-index bytes per monolith byte. Measured with tracemalloc on five
+#: real local indexes (0.5 to 111.6 MB files): 2.50x to 3.14x; #189 measured
+#: 2.52x and 2.84x by RSS on Linux. 3 errs toward evicting early.
+_INDEX_CACHE_FOOTPRINT_MULTIPLIER = 3
+_INDEX_CACHE_DEFAULT_MAX_BYTES = 512 * 1024 * 1024
 
 
 def _stamp_load_provenance(index, index_path, mtime_ns: int):
@@ -253,18 +265,66 @@ def _stamp_load_provenance(index, index_path, mtime_ns: int):
 
 def _index_cache_get(key: tuple):
     """LRU lookup — moves the entry to the most-recently-used end on hit."""
-    val = _INDEX_CACHE.get(key)
-    if val is not None:
-        _INDEX_CACHE.move_to_end(key)
-    return val
+    with _INDEX_CACHE_LOCK:
+        val = _INDEX_CACHE.get(key)
+        if val is not None:
+            _INDEX_CACHE.move_to_end(key)
+        return val
+
+
+def _index_cache_max_bytes() -> int:
+    """``JDOCMUNCH_INDEX_CACHE_MAX_BYTES``, read per call; ``<= 0`` = no byte bound."""
+    raw = os.environ.get("JDOCMUNCH_INDEX_CACHE_MAX_BYTES", "").strip()
+    if not raw:
+        return _INDEX_CACHE_DEFAULT_MAX_BYTES
+    try:
+        return int(float(raw))
+    except ValueError:
+        return _INDEX_CACHE_DEFAULT_MAX_BYTES
+
+
+def _index_cache_estimate(key: tuple) -> int:
+    """One stat of the entry's monolith, times the footprint multiplier."""
+    try:
+        return int(os.stat(key[0]).st_size) * _INDEX_CACHE_FOOTPRINT_MULTIPLIER
+    except (OSError, IndexError, TypeError, ValueError):
+        return 0
+
+
+def _index_cache_bytes() -> int:
+    """Estimated bytes held, summed over the keys actually cached."""
+    with _INDEX_CACHE_LOCK:
+        for k in [k for k in _INDEX_CACHE_ESTIMATES if k not in _INDEX_CACHE]:
+            del _INDEX_CACHE_ESTIMATES[k]
+        return sum(_INDEX_CACHE_ESTIMATES.get(k, 0) for k in _INDEX_CACHE)
+
+
+def _index_cache_clear() -> None:
+    """Empty the cache and its estimates (tests and embedders)."""
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE.clear()
+        _INDEX_CACHE_ESTIMATES.clear()
 
 
 def _index_cache_put(key: tuple, value) -> None:
-    """LRU insert — evicts oldest when over capacity."""
-    _INDEX_CACHE[key] = value
-    _INDEX_CACHE.move_to_end(key)
-    while len(_INDEX_CACHE) > _INDEX_CACHE_MAXSIZE:
-        _INDEX_CACHE.popitem(last=False)
+    """LRU insert — evicts oldest past the entry count or the byte budget.
+
+    The entry just inserted is never evicted by the byte budget, so one index
+    larger than the whole budget stays usable instead of re-reading on every
+    call.
+    """
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE[key] = value
+        _INDEX_CACHE.move_to_end(key)
+        _INDEX_CACHE_ESTIMATES[key] = _index_cache_estimate(key)
+        while len(_INDEX_CACHE) > _INDEX_CACHE_MAXSIZE:
+            old, _ = _INDEX_CACHE.popitem(last=False)
+            _INDEX_CACHE_ESTIMATES.pop(old, None)
+        budget = _index_cache_max_bytes()
+        if budget > 0:
+            while len(_INDEX_CACHE) > 1 and _index_cache_bytes() > budget:
+                old, _ = _INDEX_CACHE.popitem(last=False)
+                _INDEX_CACHE_ESTIMATES.pop(old, None)
 
 
 def _file_hash(content: str) -> str:
@@ -297,9 +357,11 @@ def format_repo_at_sha(
 def _evict_index_cache(index_path: Path) -> None:
     """Remove all cache entries for a given index path (any mtime)."""
     path_str = str(index_path)
-    stale = [k for k in _INDEX_CACHE if k[0] == path_str]
-    for k in stale:
-        del _INDEX_CACHE[k]
+    with _INDEX_CACHE_LOCK:
+        stale = [k for k in _INDEX_CACHE if k[0] == path_str]
+        for k in stale:
+            del _INDEX_CACHE[k]
+            _INDEX_CACHE_ESTIMATES.pop(k, None)
 
 
 def _load_sidecar_vectors(sidecar_path: str) -> dict:
