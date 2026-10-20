@@ -232,6 +232,13 @@ docs/ ──► parser (per format) ──► section tree ──► local index
 
 Deeper detail: [ARCHITECTURE.md](ARCHITECTURE.md) and [SPEC.md](SPEC.md).
 
+### Memory in long-running processes
+
+A parsed index takes about 2.5 to 3 times its file's size in memory (measured on five real indexes, 0.5 MB to 112 MB). Two settings keep long-running processes bounded:
+
+- **`JDOCMUNCH_INDEX_CACHE_MAX_BYTES`** caps the indexes the server keeps parsed between calls. The default is 512 MiB, estimated as 3 times each index file's size. Past it, the least recently used index is dropped and re-read when it's next needed. A single index larger than the cap is still kept. `0` or less turns the byte cap off; the 8-index cap stays either way.
+- **`JDOCMUNCH_WATCH_INPROCESS=1`** makes the watcher re-index in its own process instead of a child per batch (see below).
+
 ---
 
 ## Security and privacy
@@ -313,6 +320,25 @@ or calls Windows' on-device OCR. Neither opens a network connection. The text
 is cached under your doc-index directory (`.office_cache/ocr`). Nothing runs in
 the background and nothing is installed. See [Scanned PDFs](#scanned-pdfs) for
 what OCR'd text exposes.
+
+**A child process per watcher batch.** The watcher (`jdocmunch-mcp watch`, or
+the `jdocmunch-watch` login service) re-indexes each batch of changed files in a
+short-lived child, `python -m jdocmunch_mcp.watch_batch`. A re-index rewrites
+the whole index file, and memory used for that doesn't return to the system in
+a long-running process, so the watcher's memory used to climb toward its limit
+([#189](https://github.com/jgravelle/jdocmunch-mcp/issues/189)). The child
+returns it when it exits. It:
+
+- runs once per batch, and exits when the batch is done;
+- opens no network connection of its own; it calls only what indexing already
+  calls, such as your embedding or summary provider if you set one;
+- starts its embedding provider fresh each time. On one Windows PC, a
+  one-file batch took 0.3 s in-process, 0.55 s in a child, and 1.7 s in a child
+  with FastEmbed on (the model loads each time). sentence-transformers wasn't
+  measured and loads more slowly;
+- on Windows, opens no console window.
+
+`JDOCMUNCH_WATCH_INPROCESS=1` restores the previous in-process re-index.
 
 **A child process, when local embeddings are in use.** When the
 `sentence-transformers` provider is active, jDocMunch runs the embedding model

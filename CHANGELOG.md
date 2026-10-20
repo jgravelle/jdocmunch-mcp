@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+## [1.150.0] - 2026-10-20 - bounded memory for the watcher and the server's index cache
+
+Both fixes come from @DreDay4u's #189, which measured them on a Linux
+deployment of more than 20 indexes, the largest 90.3k sections. Their PRs
+(#190, #191) couldn't merge without a signed CLA, so we wrote these from the
+issue and our review notes, as our policy says. The diagnosis and the
+measurements are theirs.
+
+### Fixed - the watcher's memory no longer climbs toward its limit (#189)
+
+Each re-index rewrites the whole index file, however few files changed, so a
+batch's peak memory is the size of a full rebuild. In a long-running watcher
+that memory didn't return to the system: #189 measured 1.34 GB resident after
+9 hours, with a live set near zero, climbing to the service's 2 GB limit.
+
+Each batch now runs in a short-lived child, `python -m
+jdocmunch_mcp.watch_batch`, which returns the memory when it exits. The child
+opens no network connection of its own, starts no console window on Windows,
+and reports an error result back. The watcher no longer logs "re-indexed N
+file(s)" over a batch that failed (a detail #189's PR got right).
+`JDOCMUNCH_WATCH_INPROCESS=1` restores the old in-process path.
+
+The cost is a fresh start per batch. On one Windows PC, a one-file batch took
+0.3 s in-process, 0.55 s in a child and 1.7 s in a child with FastEmbed on,
+because the model loads each time. The FastEmbed figure comes with a control:
+the child reported 41 sections embedded. sentence-transformers wasn't
+measured. The README's "Background behavior" section lists the child.
+
+The watcher also reads an index's stored ignore patterns from its small
+summary file instead of parsing the whole index on every batch. #189 found
+that parse, and it also left a full index in the watcher's cache. An older
+summary without the patterns falls back to the index file.
+
+### Changed - the server's index cache has a byte budget (#189)
+
+The process-wide cache kept up to 8 parsed indexes, whatever their size. A
+parsed index takes 2.5 to 3.1 times its file's size (our measurement on five
+real indexes, 0.5 MB to 111.6 MB; #189 measured 2.52 and 2.84 times on Linux),
+so 8 large ones could hold more than a gigabyte. Each entry now carries an
+estimate (3 times its file size, from one `stat`), and the least recently used
+entries leave once the total passes `JDOCMUNCH_INDEX_CACHE_MAX_BYTES`
+(default 512 MiB, read on each insert). A single index larger than the budget
+is still kept, so it doesn't re-read on every call. `0` or less turns the byte
+budget off; the 8-entry bound stays. The total is summed from the entries
+actually cached, so a direct `clear()` or two threads inserting at once can't
+skew it.
+
+A large index may now be re-read more often in a server that switches between
+several of them. Raise the variable if that shows up as latency.
+
 ## [1.149.0] - 2026-10-19 - an optional, local reader for scanned PDFs
 
 ### Added - the `[ocr]` extra reads scanned PDFs with an engine already on the machine
