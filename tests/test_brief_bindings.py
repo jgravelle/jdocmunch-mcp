@@ -22,12 +22,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-ARCHIVE = "docs/CLAUDE-history.md"
-
-#: How many dated release sections `CLAUDE.md` may carry. Everything older
-#: rotates into ARCHIVE. ⚠ The number is a practice, not a measurement -- raise
-#: it only with the size budget in mind, never to avoid a rotation.
-MAX_DATED_SECTIONS = 3
+#: Strings that mark maintainer-internal content. The public brief is
+#: engineering rules only; maintainer notes load from a gitignored
+#: `CLAUDE.local.md`. Matched case-sensitively, on whole words where it matters.
+INTERNAL_MARKERS = [
+    r"\bjjg\b", r"\bJ's\b", r"Chief of Staff", r"Engineering-Doc",
+    r"side-session-notes", r"\bCEO\b", r"\bruling\b", r"C:\\Apps",
+    r"C:\\Users", r"\[\[",
+]
 
 
 def _claude_md() -> str:
@@ -282,75 +284,40 @@ def test_brief_says_to_confirm_the_package_version_advanced():
 
 
 # --------------------------------------------------------------------------- #
-# 4. The rotation actually happened, and nothing was lost.
+# 4. The public brief carries engineering rules, nothing internal.
 # --------------------------------------------------------------------------- #
 
 
-def _dated_sections(text: str) -> "list[str]":
-    return re.findall(r"^## v\d+\.\d+\.\d+.*$", text, re.M)
-
-
-def test_claude_md_keeps_only_the_newest_dated_sections():
-    kept = _dated_sections(_claude_md())
-    assert len(kept) <= MAX_DATED_SECTIONS, (
-        f"CLAUDE.md carries {len(kept)} dated release sections, over the "
-        f"{MAX_DATED_SECTIONS} this repo keeps. Rotate the oldest into "
-        f"{ARCHIVE} -- and ONLY into {ARCHIVE}; see test_claude_md_size.py for "
-        f"why a new path re-breaks the replay gate."
+def test_public_brief_carries_no_dated_release_narrative():
+    """Release narrative lives in CHANGELOG.md; the brief keeps the rules."""
+    dated = re.findall(r"^## v\d+\.\d+\.\d+.*$", _claude_md(), re.M)
+    assert not dated, (
+        "CLAUDE.md is public and carries dated release sections again; put the "
+        f"lesson in 'Engineering lessons' and the narrative elsewhere: {dated[:3]}"
     )
 
 
-def test_the_archive_exists_and_holds_the_rotated_sections():
-    archive = ROOT / ARCHIVE
-    assert archive.exists(), f"{ARCHIVE} is missing"
-    assert len(_dated_sections(archive.read_text(encoding="utf-8"))) > MAX_DATED_SECTIONS, (
-        f"{ARCHIVE} holds almost no dated sections, so the rotation either did "
-        f"not happen or went somewhere else"
+@pytest.mark.parametrize("marker", INTERNAL_MARKERS)
+def test_public_brief_carries_no_internal_markers(marker):
+    hits = [ln for ln in _claude_md().splitlines() if re.search(marker, ln)]
+    assert not hits, (
+        f"CLAUDE.md is public, but {marker!r} marks maintainer-internal content. "
+        f"Move it to the private notes CLAUDE.local.md loads: {hits[:3]}"
     )
 
 
-def test_claude_md_points_at_the_archive():
-    """⚠ A split with no pointer is a deletion."""
-    assert ARCHIVE in _claude_md(), (
-        f"CLAUDE.md does not say where the history went. {ARCHIVE} is not "
-        f"loaded into a session, so a reader who is not told it exists has "
-        f"simply lost the content."
-    )
+def test_the_marker_scan_fires_on_internal_text():
+    """Non-vacuity: every marker matches a line it exists to catch."""
+    samples = ["per jjg on the thread", "J's call", "ask the Chief of Staff",
+               "Engineering-Doc wrote", "in side-session-notes", "the CEO said",
+               "a ruling of 2026", "C:\\Apps\\hq", "C:\\Users\\j", "see [[memo]]"]
+    for marker, sample in zip(INTERNAL_MARKERS, samples):
+        assert re.search(marker, sample), (marker, sample)
 
 
-def test_no_dated_section_was_lost_or_duplicated_by_the_rotation():
-    """⚠ A rotation reviewed by eye is how an entry goes missing.
-
-    Every dated heading that CLAUDE.md carried at the previous commit must now
-    live in EXACTLY ONE of the two files -- not zero, not both.
-    """
-    import subprocess
-
-    try:
-        prev = subprocess.run(
-            ["git", "show", "HEAD:CLAUDE.md"],
-            cwd=ROOT, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-        )
-    except FileNotFoundError:
-        pytest.skip("git absent (sdist checkout)")
-    if prev.returncode != 0:
-        pytest.skip("no usable git here")
-
-    before = set(_dated_sections(prev.stdout))
-    if not before:
-        pytest.skip("HEAD:CLAUDE.md carries no dated sections to account for")
-
-    now = set(_dated_sections(_claude_md()))
-    archived = set(_dated_sections((ROOT / ARCHIVE).read_text(encoding="utf-8")))
-
-    lost = sorted(h for h in before if h not in now and h not in archived)
-    assert not lost, (
-        f"{len(lost)} dated section(s) present at HEAD are now in NEITHER "
-        f"CLAUDE.md nor {ARCHIVE}:\n" + "\n".join(lost[:10])
-    )
-    both = sorted(h for h in before if h in now and h in archived)
-    assert not both, (
-        f"{len(both)} dated section(s) are in BOTH files; the archive is the "
-        f"single home for a rotated entry:\n" + "\n".join(both[:10])
+def test_claude_local_md_is_gitignored():
+    """The maintainer-notes loader must never be committed or shipped."""
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert re.search(r"^CLAUDE\.local\.md\s*$", gitignore, re.M), (
+        ".gitignore no longer lists CLAUDE.local.md"
     )
