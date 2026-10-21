@@ -52,3 +52,5 @@ mcpb/manifest.json
 # Ephemeral task prompts (see the .305 relnotes.md sdist lesson -- a scratch
 # file in the repo root is swept into the sdist by `git add -A`)
 TASK-PROMPT*.md
+# Maintainer-only notes; imports a private file outside the repo.
+CLAUDE.local.md

@@ -3,86 +3,20 @@
 **Version:** 1.150.0 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
-⚠ **`python -m pytest`, not bare `pytest`**, matching the suite rule in
-`C:\MCPs\CLAUDE.md`. The `-m` form guarantees the interpreter that receives
+⚠ **`python -m pytest`, not bare `pytest`**, matching the rest of
+the jMunch suite. The `-m` form guarantees the interpreter that receives
 `PYTHONPATH=src` is the one running the tests; a bare `pytest` shim can resolve
 into a different environment, and without `PYTHONPATH` the INSTALLED package
 shadows `src/`. ⚠⚠ **Neither form reproduces CI** — see "reproduce CI" under
 Standing operational notes; this one is the edit loop, not the gate.
 
-## v1.150.0 — #189: watch batches in a child, a byte budget for the index cache
+Maintainers may also have a `CLAUDE.local.md` here (gitignored), which loads
+private working notes. Nothing in this file depends on it.
 
-@DreDay4u's #189 (measured on Linux, 20+ indexes). Their PRs #190 / #191
-were never signed under the CLA; the 24h default ran out 2026-10-19 23:34 UTC,
-so we wrote both from the issue and J's review notes, crediting them by name.
-`watch_batch.py` runs one batch per child (`watch._reindex_batch`;
-`JDOCMUNCH_WATCH_INPROCESS=1` restores the old path). `_corpus_filters` reads
-`corpus_shape_patterns` from the summary sidecar. `_INDEX_CACHE` gained
-`_INDEX_CACHE_ESTIMATES` and `JDOCMUNCH_INDEX_CACHE_MAX_BYTES` (512 MiB).
+## Engineering lessons
 
-⚠⚠ **A measurement needs a control saying the thing ran.** The first
-FastEmbed timing (1.4 s per child batch) came from a child whose model file
-was missing: `embedding_provider_error` was set and nothing was embedded.
-The valid figure (1.7 s, `embedded_sections: 41`) used Chroma's local copy
-of the same model under `HF_HUB_OFFLINE=1`, so nothing was downloaded.
-⚠ **The byte total is summed from the keys cached, never a running
-counter.** 10+ test files call `_INDEX_CACHE.clear()` directly; a counter
-would drift there and under racing puts. A test pins it.
-⚠ **When the seam moves, the stub follows** (again): `test_v1_98_0`
-stubbed `index_local`, which a child process can't see. It now sets
-`JDOCMUNCH_WATCH_INPROCESS=1`, since grouping is its subject.
-
-## v1.149.0 — the `[ocr]` extra: a modest reader for scanned PDFs
-
-J's go on the 2026-10-18 design (`jdoc-ocr-modest-reader-design.md`, Chief of
-Staff's notes folder), option B twice. `parser/ocr.py` reads PDF pages that
-have no text layer with Tesseract (env path, PATH, default folders incl.
-`%LOCALAPPDATA%\Programs`) or Windows.Media.Ocr. Two keys: `JDOCMUNCH_OCR=1`
-in config AND `ocr=true` / `--ocr`; the choice is stored as
-`DocIndex.ocr_requested` and inherited when `ocr` is None. Sections carry
-`text_source: "ocr"`; the response carries an `ocr` block. 60 s budget per
-MCP call (CLI: none), 50-page cap, per-page cache under `.office_cache/ocr`.
-
-⚠⚠ **Two of the design's six stop conditions tripped, and both are on the
-record.** Condition 1's prose bar was moved after seeing data (J,
-2026-10-19: 8 pages -> the 6 without type specimens; original Tesseract
-0.9489, CER 0.069 / 0.116). The pre-registered table detector failed its one
-test (2 of 3 forms, 1 of 9 prose flagged) and was dropped. **Never restate
-the moved bar as the original one**, and never reintroduce a per-page table
-flag without a new pre-registration.
-⚠ Condition 4 is met only by disclosure: Tesseract took 69 s on a 20-page
-scan against the 60 s budget. The README says so; keep it saying so.
-⚠ `scripts/ocr_regression/` is the manual pre-release check (network + a
-real engine). It is sdist-excluded and guarded by `test_sdist_exclusions`.
-Its data lives in the `.py` so the replay corpus never indexes it.
-⚠ `mark_sections` found the root note by "before the first OCR span" in its
-first draft, which marked a text-layer page 1 as OCR. The test with a mixed
-PDF caught it; keep that test.
-
-## v1.148.1 — a scanned PDF is reported, not indexed empty (#188)
-
-Phase 0 of the 2026-10-18 OCR report (report at the Chief of Staff's notes
-folder, `jdoc-ocr-report.md`). markitdown turns a PDF with no text layer into
-`''` with no error; `index_local` then listed it as indexed, kept
-`coverage_complete: true` and stored one empty section. Now an office
-document whose converted text holds no letter or digit is skipped as
-`no_extractable_text` (actionable), with a warning that jDocMunch runs no
-OCR. Also carries #187, a test-only fix for a Windows/3.10 timing flake.
-
-⚠⚠ **An empty conversion is not an error, so nothing downstream saw it.**
-Check a converter's OUTPUT, not just whether it raised. The OCR extra itself
-(phase 1) waits on J; any bake-off uses public or synthetic scans, never J's
-own financial documents.
-⚠ Measured for the report: RapidOCR's bundled models lost about a third of a
-synthetic English page at confidence 0.97 or more. OCR confidence is not a
-guard on its own.
-
-## Lessons from rotated entries (v1.116.0–v1.148.0, lifted 2026-08-29 / 2026-08-30 / 2026-09-17 / 2026-09-19 / 2026-09-21 / 2026-09-24 / 2026-10-06 / 2026-10-12 / 2026-10-14 / 2026-10-15 / 2026-10-16 / 2026-10-17 / 2026-10-18 / 2026-10-19 / 2026-10-20)
-
-⚠⚠ **These outlived the releases that produced them.** Each line names the
-version whose full narrative now lives in `docs/CLAUDE-history.md`. **Read the
-line here; go to the archive only when you need the evidence behind it.** An
-entry that earned no reusable rule got no line.
+Rules that outlived the releases that produced them. Each line names the
+version it came from; `CHANGELOG.md` has that release's full entry.
 
 **Releasing**
 
@@ -96,12 +30,6 @@ entry that earned no reusable rule got no line.
   `https://cla-assistant.io/check/jgravelle/jdocmunch-mcp?pullRequest=<n>`
   posted it within seconds on our own #162. For a contributor who hasn't
   signed, absent still means NOT SIGNED. (v1.145.2)
-- ⚠ **The agent's `gh pr merge` is refused by the permission classifier.**
-  Hand jjg the cmd.exe line, and name the PR number: an issue number returns
-  "Could not resolve to a PullRequest". (v1.145.0)
-  ⚠ **Clear the token as `set "GITHUB_TOKEN="`, quoted.** In cmd.exe,
-  `set GITHUB_TOKEN= && gh ...` sets it to the space before `&&`, and gh
-  then refuses the keyring. Hit on the #167 merge line. (v1.145.4)
 - ⚠⚠ **A docs-only commit after a build still stales the artifacts.**
   `ROADMAP.md` and `CHANGELOG.md` ship in the sdist, so 1.143.0 was rebuilt
   and CI re-read on the later SHA before upload. Release from the SHA the
@@ -131,6 +59,32 @@ entry that earned no reusable rule got no line.
 
 **Writing a fix**
 
+- ⚠⚠ **A measurement needs a control saying the thing ran.** The first
+  FastEmbed timing for a watch child (1.4 s) came from a child whose model
+  file was missing: `embedding_provider_error` was set and nothing was
+  embedded. The valid figure (1.7 s) reported `embedded_sections: 41`.
+  (v1.150.0)
+- ⚠ **A byte total over a cache is summed from the keys still cached,
+  never kept as a running counter.** Tests call `_INDEX_CACHE.clear()`
+  directly, and puts can race; a counter drifts under both. (v1.150.0)
+- ⚠ **A watch batch runs in a child process by default**, where a test's
+  stub of `index_local` can't reach. Tests about grouping or filtering set
+  `JDOCMUNCH_WATCH_INPROCESS=1`. (v1.150.0)
+- ⚠⚠ **The OCR prose bar was moved once, after seeing data**: from 8 pages
+  to the 6 without type specimens (original Tesseract 0.9489, CER 0.069 /
+  0.116). Never restate the moved bar as the original, and never add a
+  per-page table flag without a new pre-registered test. The README's
+  statement that a 20-page scan can exceed the 60 s budget with Tesseract
+  is what makes that budget acceptable; keep it. Run
+  `scripts/ocr_regression/ocr_regression.py` before releasing a change to
+  `parser/ocr.py`. (v1.149.0)
+- ⚠ **`mark_sections` must find the root note by the first `## Page`
+  heading**, not by the first OCR span: a text-layer page 1 sits before the
+  first span. The mixed-PDF test pins it. (v1.149.0)
+- ⚠⚠ **An empty conversion is not an error, so nothing downstream sees
+  it.** markitdown turns a PDF with no text layer into `''` with no error.
+  Check a converter's OUTPUT, not just whether it raised. OCR confidence is
+  not a guard on its own either. (v1.148.1)
 - ⚠⚠ **`semantic_search` means "a provider is configured", not "vectors
   exist".** A bare `except` hid a missing `model.onnx`; `embedding_provider_error`
   is the key that says so. Profile without cProfile first: it inflated
@@ -167,8 +121,8 @@ entry that earned no reusable rule got no line.
   worse (2.3 s at 8 globstars). `path_glob_matches` walks segment
   boundaries, and its test counts regex calls, not time. A `**/` glob is
   an ADDITIVE result change on 1.x: plain `fnmatch` decides alone when it
-  matches. ⚠ jcm's `file_pattern` likely has the same gap, unverified;
-  that repo's session owns it. (v1.145.3)
+  matches. ⚠ jcodemunch-mcp's `file_pattern` likely has the same gap
+  (unverified). (v1.145.3)
 - ⚠⚠ **The watcher's directory census prunes by ONE rule, "not a directory
   link"** (#154). Discovery also skips dot-directories, SKIP_PATTERNS and
   ignored paths. Pruning more than the census loses updates; jcm's first
@@ -363,7 +317,7 @@ entry that earned no reusable rule got no line.
 - ⚠ **A generator that concatenates atoms can spell the token it was told
   to leave out.** A "no globstar" fuzz drew `*` then `*/` and made `**/` in
   90 of 4,000 globs. (v1.145.3)
-- ⚠ **WSL Ubuntu on this box runs Linux tests.** Sync a Linux-side venv
+- ⚠ **WSL Ubuntu on a Windows dev box runs Linux tests.** Sync a Linux-side venv
   (`UV_PROJECT_ENVIRONMENT=$HOME/.venvs/<name> uv sync --group dev --python
   3.12`) and set `WATCHFILES_FORCE_POLLING=false`, since watchfiles polls
   under WSL by default. Two git-pointer tests fail there because a Windows
@@ -420,7 +374,7 @@ entry that earned no reusable rule got no line.
 
 **Claims and evidence**
 
-- ⚠ **#152 is CLOSED not-planned (jjg, 2026-09-25), reopen invited.**
+- ⚠ **#152 is closed as not planned; reopening is welcome.**
   `related_persist.lookup` parses the whole `related.json` (1.99 s, 220 MB
   resident if memoized), but only `get_related_sections` calls it and there
   is no record of that tool being called. **Reopen on a user's latency
@@ -494,16 +448,16 @@ dev dep purely so the six tests asserting **fast path == reference** actually
 run. They had skipped on EVERY CI run — a divergence between the two paths would
 have shipped unnoticed. CI-equivalent env went 1982 passed/14 skipped → 1988
 passed/8 skipped. ⚠ **`PYTHONPATH=src pytest` on a dev box is NOT the same run as
-CI** — this box has numpy from other packages, so the gap was invisible locally;
+CI** — a dev box may have numpy from other packages, so the gap was invisible locally;
 reproduce CI by SYNCING FIRST, with the flags the workflow itself uses:
 `uv sync --group dev --python 3.13` then `uv run --python 3.13 pytest tests/ -q`
-([[feedback_an_assumption_about_the_machine_is_not_a_fixture]]).
+.
 ⚠⚠ **A `uv run` with no `uv sync` in front of it inherits a `.venv` it did not
 create**, so it silently tests whatever happens to be installed. jcm shipped
 that exact command and measured the cost: the run came back **exit 0 with the
 totals reconciling exactly** while `passed` fell 8,721 to 8,634 and `skipped`
 rose 19 to 124 — **105 tests did not execute.** Exit code and total were both
-"green". **Read the SKIP count**; jdoc's baseline on this box is 6 POSIX-only
+"green". **Read the SKIP count**; jdoc's baseline on a Windows dev box is 6 POSIX-only
 skips, and CI's is 11 (it installs neither offline embedding provider nor
 `openai`). ⚠ **Do NOT copy jcm's `uv sync --locked --group dev --extra watch`** —
 this repo's `uv.lock` is gitignored so `--locked` fails, and there is no `watch`
@@ -519,39 +473,13 @@ count did not move (1988 → 1988), which is the check that matters** — nothin
 that ever executed was removed. If that design is ever revived, write the tests
 against the API that exists.
 
-⚠ **2026-08-07: #102/#103/#104/#105 all CLOSED in 1.124.0.** ⚠ Re-run
-`gh issue list --state open` before quoting any tracker state; never transcribe
-a count into this file. **The `coordinated-retirement` hold is OVER** — #92
-merged as `3037428`, branch deleted from the workflow. Nothing is held; ship
-from `master`.
+## Reranking
 
-## Rerank POC ruling (jjg, 2026-09-19): no `[rerank]` extra
-
-⚠⚠ **Do NOT merge a reranker or a `[rerank]` extra into this repo on the
-evidence we have.** A pre-registered study (harness, criteria and both decision
-memos at `C:\MCPs\jdoc-rerank-bench`, outside this tree on purpose) reranked the
-hybrid top 15-20 with an ONNX int8 MiniLM cross-encoder on two frozen test
-splits. The gain was real (+0.097 and +0.058 nDCG@5) and latency passed
-(195 / 288 ms), but it made 14.9% and 13.7% of queries worse against a 12% limit
-set before any data. **The limit failed twice and was not overridden.** Jev
-(TypeSafe) stays unbuilt until a local reranker clears that bar. ⚠⚠ **Jev WAS
-run once, 2026-09-20, as a pre-registered exploratory screen on the spent splits
-(harness A3/A4/A5), and it cleared A3's bar.** That authorises a confirmatory
-study and nothing else — **never say it passed section 7**, which judges it
-against a local reranker that cleared section 6, and none has. ⚠ Two caveats
-travel with every quote of it: the hosted judge was graded against LLM-produced
-labels using near-rubric wording, so part of its margin is grader agreement the
-harness cannot isolate; and it is not deterministic where our local model is.
-A hosted provider sends query and passage text off the machine: opt-in, default
-off, README-disclosed before it ships. Public record: `ROADMAP.md` ("A rerank
-stage, and Jev as a provider for it"). ⚠ **The screen's memo and every arm B
-figure are UNPUBLISHED**, held pending a review of the vendor's terms — they are
-not in the public harness repo, so do not quote a number for arm B from memory.
-
-⚠ **The largest effect in that study was ours already: hybrid search beat
-lexical by +0.09 to +0.18.** A default install has no embedding provider, `init`
-never mentions one, and `use_embeddings="auto"` then resolves to lexical. The
-follow-on work is getting users onto hybrid, not adding a stage after it.
+A local cross-encoder rerank stage was evaluated in a pre-registered study and
+not adopted: it improved nDCG@5 but made more queries worse than the limit set
+before the data. `ROADMAP.md` ("A rerank stage") is the public record. Hybrid
+search already beat lexical by +0.09 to +0.18 nDCG in the same study, so
+getting users onto an embedding provider is the bigger lever.
 
 ⚠ `semantic` already means embedding fusion in `search_sections`; any future
 rerank parameter is named `rerank`. ⚠ A rerank stage must leave
@@ -613,20 +541,13 @@ exact, so it is still load-bearing.
   quietly rewritten — **a recomputed history is a guess wearing a measurement's
   clothes.**
 
-
 ## Release: the two steps that are only written down here
 
-⚠⚠ **The full checklist lives in the `release` skill, which is now TRACKED
-HERE at `.claude/skills/release/SKILL.md` (2026-09-01).** It was copied from
-jcodemunch-mcp — verbatim, plus a marked delta block, because two copies that
-drift silently are worse than one copy with an explicit delta list.
-⚠⚠ **It drifted silently anyway, within a day.** jcm rewrote step 7 on
-2026-09-02 and nobody ported it; 1.142.0 (2026-09-19) handed over the stale
-line. Re-synced that day. ⚠ jcm now TRACKS its copy (2026-09-04) and its
-publish steps are superseded by its `release.yml`; a THIRD, untracked copy sits
-at `C:\MCPs\.claude\skills\release\`. **Three copies, no test binding any two**
-— diff this file's body against jcm's before a release rather than trusting
-"verbatim".
+⚠⚠ **The full checklist lives in the `release` skill,
+`.claude/skills/release/SKILL.md`**, written for this repo (four pin sites, no
+release workflow, the CI-reproduce command, the registry read-back). Sibling
+repos keep their own copies; when a step changes in one, check whether the
+others need it, since no test binds them.
 
 ⚠⚠ **The two items below STAY restated here, and that is not redundancy.**
 Each has already cost a real incident, and a skill file is loaded only when
@@ -671,10 +592,7 @@ GITHUB_TOKEN="" gh api repos/jgravelle/jdatamunch-mcp/contents/.github/workflows
 
 ⚠ Same file also no-ops when `pyproject.toml`'s version already has a release
 (`gh release view "$TAG" ... && exit 0`), so a docs-only push to jdata master is
-safe and does NOT need a version bump to avoid a failed tag. ⚠⚠ **I advised the
-opposite on 2026-08-29 from the release skill's one-line summary without opening
-the workflow** — the summary says jdata "AUTO-RELEASES on push to master", which
-is true and incomplete, and the missing half is the guard.
+safe and does NOT need a version bump to avoid a failed tag.
 
 ⚠ **Pushing is not checking, and a green local suite is not a green build.**
 Four consecutive jcm releases (.259–.262) were published, tagged and
@@ -754,8 +672,8 @@ stall a release, careful review becomes expensive to accept, which is backwards.
 **3. A contributor's PR is never the only path.** Timebox and keep our own path
 warm.
 
-**3a. NO TIMEBOX WE OFFER RUNS LONGER THAN 24 HOURS — absolute, no exceptions**
-(jjg, 2026-08-14; closed to exceptions 2026-08-20). It covers every shape:
+**3a. NO TIMEBOX WE OFFER RUNS LONGER THAN 24 HOURS — absolute, no exceptions.**
+It covers every shape:
 signing the CLA, opening a PR already written, and taking an issue to implement.
 
 ⚠⚠ **The window is only fair BECAUSE the default action preserves credit.** At
@@ -826,211 +744,26 @@ GITHUB_TOKEN="" gh api --method POST "repos/jgravelle/<repo>/actions/runs/<id>/a
 time-to-close is 1 day (60 issues, 45 within a day, 1 ever past a week). True,
 and NOT a response: the cost of a blocked issue is CONCENTRATED, not
 distributed. Design the fix at the OUTLIER. See
-[[feedback_dont_answer_pain_with_aggregates]].
+.
 
 Surfaces: `CONTRIBUTING.md` + `.github/ISSUE_TEMPLATE/`.
 
-## #95 SPLIT 2026-07-28: 15 of 19 criteria satisfied, 3 split out and fixed
+## Index locking and the QA evidence tools
 
-Applied the one-issue-one-verdict rule to our own gate. All 19 acceptance
-criteria were checked **against the branch**, not against a summary of it:
-**15 satisfied**, evidenced by 58 tests across six `test_issue95_*.py` files.
-⚠ **PR #97 was FAR larger than the four items recorded above** — it includes
-seven real-subprocess `test_spawn_*` cases, which is the "real-process
-interruption, not mocked exceptions" criterion nobody had ticked.
-
-Three were genuinely open, split into their own issues, and all three are now
-fixed and closed:
-
-- **#98** QA-25 exhaustiveness (`b476e09`). The old guard was a PRESENCE check by
-  design; it could not fail when a NEW caller arrived with no policy. Now every
-  production `delete_index` call must pass `lock_wait` or be named in
-  `UNCONTENDED_EXEMPT` with a reason. ⚠ **`UNCONTENDED_EXEMPT` is empty ON
-  PURPOSE** — add a site with its reason, never loosen the rule.
-- **#99** installed-wheel smoke (`a84c757`). New `package-smoke` CI job on ubuntu
-  + windows builds the wheel, installs into a clean venv, runs
-  `scripts/smoke_installed.py` from a dir with no `src/` reachable. ⚠ **The
-  script REFUSES to run if it imported from a source tree** — without that it
-  passes by testing `src/` again and the job is decorative.
-- **#100** machine-generated evidence (`a84c757` + `79c6542` + `132c8e1`).
-  `scripts/evidence_receipt.py` emits a receipt per matrix job from
-  `pytest --junitxml` (built in, no new dep) and rolls them into a summary.
-
-⚠⚠ **The receipt tool took THREE defects, all found by reading a REAL CI receipt
-rather than the local one.** (1) `tree_clean` false on a pristine checkout,
-because the run writes junit.xml/coverage/receipts before emitting — **a signal
-that always fires hides the case it exists for**. (2) It recorded the synthetic
-PR-merge SHA, which is `fatal: bad object` in branch history. (3) The fix for (2)
-then CLAIMED `GITHUB_SHA` was the branch head — **on a `pull_request` event
-`GITHUB_SHA` IS the merge commit**; the head is reachable ONLY via
-`github.event.pull_request.head.sha` passed from the workflow as `PR_HEAD_SHA`.
-**A false provenance line inside the provenance artifact.**
-
-Two honesty guards, both proven to fire: a dirty tree is recorded and surfaced,
-and a summary spanning >1 SHA prints `MIXED SHAs. This is not evidence for a
-single candidate.` rather than averaging runs into a figure describing nothing.
-
-⚠ Receipt counts split **1972 Linux / 1967 Windows on identical 1981 totals**
-(9 vs 14 skips) — that is the five POSIX-only tests, i.e. the QA-24 mechanism
-showing itself. **Never read a Windows pass as verifying a locking contract.**
-
-⚠ **The QA harness is an ISSUE ATTACHMENT, not a repo file** — `find` in the
-tree returns nothing. Pull it from the #95 body links, copy into `tests/` to
-run, then DELETE it.
-
-⚠ **State that lives only on a PR is state the gate does not carry.** On
-2026-07-28 every substantive point was answered on #97 and NOT on #95, leaving
-the gate of record showing "Ready for your review" as its last word. Mirror PR
-outcomes back to #95.
-
-## #93/#95 contribution path DECIDED 2026-07-26: rknighton implements, via PR
-
-Answered the contribution-path question he raised on #93 and escalated on #95 as
-formally unanswered: **option 3, a PR against `coordinated-retirement`.**
-⚠ **The deciding factor is the CLA, not review convenience.** `CONTRIBUTING.md:7`
-makes a signed CLA a hard merge gate (jdoc is dual-licensed, paid commercial
-tier), and he has **16 issues / ZERO PRs** here, so nothing is on file.
-⚠ **A patch pasted into an issue is the WORST of the three options** — real code
-with no signing record at all — which inverts the intuition that a patch is the
-lighter-weight ask. A PR makes cla-assistant prompt automatically. Same
-reasoning that closed jcm#380.
-
-⚠ **Independence: the ORACLE survives his authorship, his JUDGMENT does not.**
-jjg committed on #90 that v1.115 is held for independent re-verification and
-QA-17 will not be self-certified. `qa_lifecycle_contract.py` is already LOCKED
-with published pre-fix receipts (3 passed / 4 failed at `99a31c1`, identical
-across 5 runs) and #95's acceptance criteria predate any implementation — that
-is pre-registration, so the gate cannot be reshaped to fit the fix. What is lost
-is his adversarial pass on the new code; **that role moves to US, and the release
-notes must SAY so** rather than let the record imply author-verification.
-
-PR scope requested: QA-19 + QA-23 + QA-21 + the `reason_code` vocabulary w/
-SPEC.md drift guard, Path A. Follow-ons: process-interruption durability,
-installed-wheel matrix, frozen-SHA run. **QA-25 was in that scope and we then
-took it — see below. Disclosed on #95 rather than left for him to find, with an
-offer to revert if his local version differs, since he owns the contract.**
-
-## ⚠ "v1.115.0" IS A LABEL, NOT THE SHIPPED VERSION (clarified 2026-07-27)
-
-⚠ **The retirement release ships as 1.120.0 or later. It can never be 1.115.0,
-and the reservation plan never actually said it would be.** Read this before
-writing "v1.115.0" in another release note or issue comment.
-
-What is TRUE: master deliberately skipped 1.115.0 (1.114.2 -> 1.116.0) to reserve
-the number for the held branch, and `CHANGELOG.md` on `coordinated-retirement`
-carries a `[1.115.0]` entry that master's does not. **That part worked as
-designed and the entry STAYS** as the historical record of this branch's work.
-
-What is ALSO true and was being missed: **the branch's `pyproject.toml` has NEVER
-said 1.115.0 — zero occurrences across its entire history** (`git log -p
-coordinated-retirement -- pyproject.toml`). Master merges carried it forward and
-it currently reads 1.119.0. The plan always said "resolve version conflicts to
-the HIGHER number," so the shipped artifact was ALWAYS going to be >= 1.119.0.
-
-⚠ **Publishing 1.115.0 after 1.119.0 would ALSO be self-defeating even if we
-tried: `pip install jdocmunch-mcp` resolves to the HIGHEST version, so the
-retirement work would ship into a version nobody receives by default.**
-
-**How to say it:** "tracked as the 1.115.0 CHANGELOG entry, shipping as 1.120.0."
-Disclosed to rknighton on
-[#95](https://github.com/jgravelle/jdocmunch-mcp/issues/95) 2026-07-27 rather
-than left for him to notice, since he has been verifying something under a name
-that will never appear in `pip show`. ⚠ **Nothing about the harness, the frozen
-oracle, the acceptance criteria or any receipt depends on the number.**
-
-## ⏰ Retirement release TIME-BOXED through 2026-08-02 (set 2026-07-26) — RESOLVED
-
-✅ **RESOLVED 2026-07-29: he completed it AHEAD of the box, so the fallback
-never fired.** Kept below for the reasoning, which stands: the time-box existed
-to stop OUR latency becoming HIS obligation, and it is now the suite-wide policy
-in `CONTRIBUTING.md`. ⚠ **Do NOT quote the fallback sentence as if it shipped.**
-
-⚠ **Original text follows (historical):** ACTION DUE 2026-08-02. The release was gated on an unpaid volunteer's
-re-verification with no deadline, holding #80/#89/#90 open indefinitely. That is
-our design error, not his. Posted on
-[#95](https://github.com/jgravelle/jdocmunch-mcp/issues/95#issuecomment-5083861358)
-+ [#90](https://github.com/jgravelle/jdocmunch-mcp/issues/90#issuecomment-5083862220).
-
-**If his re-verification/PR lands by 2026-08-02** it is the gate, as agreed.
-**If it does not**, release on his pre-registered harness green at a frozen SHA,
-with the release notes carrying VERBATIM: *"Verified against the reviewer's
-pre-registered lifecycle harness at a frozen SHA. Not independently re-verified
-by its author."* ⚠ **That exact wording is the point** — jjg promised on #90 that
-QA-17 would not be self-certified, and a harness pass is a WEAKER claim than his
-sign-off. Label it as weaker; never let the changelog blur the two.
-
-⚠ **Nothing expires.** Findings stay credited by ID, issues stay open, and a
-re-verification arriving AFTER the box still counts in full — correct anything it
-contradicts, in a follow-up release if needed. He was also told explicitly he may
-hand back QA-19/QA-23/QA-21 at no cost, because a clear no beats an open-ended
-maybe.
-
-**Engagement data behind the decision (2026-07-26):** he is NOT disengaged — his
-median turnaround is **3.1h vs our 6.7h**, his longest self-gap in the arc is
-50.3h and he broke it unprompted, and he filed #95 with 5 attachments 14.4h
-before this was written. ⚠ **His activity clusters at UTC 00-04 and 17-23, so
-posts landing 13:00-14:00 UTC sit in his off-hours** — silence there is his
-normal pattern, not a warning sign. **We have been the slower party**; he had to
-re-raise the contribution-path question in #95 before we answered ~20h later.
-The time-box exists to stop OUR latency becoming HIS obligation.
-
-## QA-25 SHIPPED by us 2026-07-26 (`8d15897`): intent is stated, never inferred
-
-Closes the branch's single known red test, Linux-only
-`test_v1_115_0_lifecycle_v2.py::test_three_processes_keep_one_lock_inode`
-("DID NOT RAISE Empty"). ⚠ **Root cause is NOT the default's value — it is that
-two tests asked the default to arbitrate a question it cannot answer.** Both
-production callers were ALREADY explicit (`tools/delete_index.py:36` `False`,
-`tools/index_local.py:231` `True`), so **those two tests were the only implicit
-callers in the entire repo**, requiring OPPOSITE behavior on the SAME lock. No
-default could satisfy both. At `False` the QA-15 deleter returned instead of
-blocking, so nothing reached the queue and `pytest.raises(queue.Empty)` got a
-value.
-
-Fix is the reviewer's rule, verbatim: every contention-sensitive caller states
-whether it waits or refuses; the lock never infers intent from surrounding
-state. QA-15 deleter → `lock_wait=True`; QA-17 gate contender →
-`lock_wait=False`; `⚠ UNRESOLVED` docstring block replaced with the resolution.
-⚠ **This SUPERSEDES our proposed retirement-record inference — do not resurrect
-it.** It also dissolved a constraint that was OURS, not his: we were trying to
-satisfy both tests WITHOUT editing either, and their author told us to edit them.
-
-⚠ **The default STAYS `False`, and that is a data-loss argument, not a
-preference:** a caller that forgets to say gets the REFUSING behavior, which
-preserves the QA-17 guarantee that both participating indexes are never
-simultaneously absent. Defaulting to blocking would make forgetting cost an
-index. New `tests/test_v1_115_0_qa25.py` pins it by signature inspection.
-
-⚠ **The second guard is a PRESENCE check, deliberately, and its docstring says
-so.** It asserts each contention-sensitive function contains a
-`delete_index(..., lock_wait=<expected>)` call and says nothing about its other
-calls. **Our first version demanded EVERY call be explicit and produced 8
-findings that were all noise** — two of those functions also delete uncontended,
-as first acquirers where the flag cannot change the outcome. It is a
-signature-level assertion on purpose: it runs on BOTH platforms, whereas the
-behavioral test that would catch the loss SKIPS on Windows, which is exactly how
-this regressed unnoticed. Both guards proven non-vacuous (remove the argument →
-guard fails naming function+line; flip the default → drift assertion fails).
-
-Receipts, all 8 jobs green at `8d158975ad2b515289c8ad524f3e2b971d397dbe`
-([run 30204690565](https://github.com/jgravelle/jdocmunch-mcp/actions/runs/30204690565)):
-Linux 1875 passed / 9 skipped ×4, Windows 1870 passed / 14 skipped ×4. Against
-`69c91c4`, Linux went 1 failed / 1872 passed → 0 failed / 1875 passed.
-⚠ **The 1875/1870 split is 5 POSIX-only tests (9 vs 14 skips, identical 1884
-totals) and QA-15 is one of them — that number IS the QA-24 mechanism**, so
-never read a Windows pass as verifying a locking contract.
-
-**CI: `fail-fast: false` added to the Tests matrix (`69c91c4`).** One ubuntu-3.10
-failure was cancelling all four Windows jobs, so the frozen review SHA carried
-NO Windows result while the panel showed 8 failures where there was 1. Code
-identical to the old pin (`git diff --stat 99a31c1 69c91c4 -- src/ tests/
-pyproject.toml` is empty), announced on-issue rather than pushed quietly.
-⚠ **RETRACTED on the record: our claim that the draft PR's `synchronize` event
-"has not been firing" is WRONG** — `gh run list` shows `pull_request`-event runs
-at BOTH `99a31c1` and `69c91c4`. Branch CI has been firing on push all along;
-cancellations made those runs unreadable in the panel. `workflow_dispatch` is
-still worth keeping (re-run any ref without pushing), but the diagnosis attached
-to it was false. Head is HELD from here while he works.
+- **Every contention-sensitive `delete_index` caller states `lock_wait`**;
+  the lock never infers intent. The default stays `False` (refuse) because a
+  caller that forgets then keeps both indexes present, where blocking would
+  cost one. `UNCONTENDED_EXEMPT` is empty on purpose: add a site with its
+  reason, never loosen the rule. `tests/test_v1_115_0_qa25.py` pins it.
+- **The behavioural locking tests are POSIX-only**, so a Windows pass never
+  verifies the locking contract; the 5-test skip gap between Linux and
+  Windows runs is that mechanism showing.
+- **`package-smoke` CI** builds the wheel, installs it in a clean venv and
+  runs `scripts/smoke_installed.py`, which refuses to run from a source tree.
+- **`scripts/evidence_receipt.py`** writes one receipt per CI job from
+  `pytest --junitxml`. On a `pull_request` event `GITHUB_SHA` is the merge
+  commit; the head comes from `PR_HEAD_SHA`. A summary spanning more than one
+  SHA says so instead of averaging.
 
 ## CHANGELOG maintenance warning (2026-07-18 incident)
 CHANGELOG.md's established format is `## [X.Y.Z] - date - title` with curated
@@ -1042,13 +775,12 @@ CHANGELOG section ids, so regeneration turned Tests+Replay red on an otherwise
 docs-only commit (recall 1.0 -> 0.7, exactly the 3 CHANGELOG goldens).
 Maintain CHANGELOG by hand-appending entries in the established format, and
 keep new entry wording clear of fixture query phrases
-([[feedback_fixture_query_corpus_pollution]] class).
+ class).
 
-
-## Replay-corpus warning: trimming CLAUDE.md can break the replay gate
+## Replay-corpus warning: a large new doc can break the replay gate
 
 Same class as the CHANGELOG incident above, hit 2026-07-26 while tracking
-`docs/CLAUDE-history.md`. ⚠ **The replay self-fixture indexes `repo_path: "."` —
+a large archive of release notes. ⚠ **The replay self-fixture indexes `repo_path: "."` —
 the WHOLE REPO — so any large markdown file added to the tree joins the retrieval
 corpus and competes with the goldens.** Tracking 115 KB of trimmed release-brief
 prose dropped nDCG to **0.906 against a 0.95 gate with recall still 1.0** (every
@@ -1060,58 +792,15 @@ golden found, just outranked), failing
 have it.** Local runs were red while all 8 CI jobs at `69c91c4` were green. Any
 "CI is green at the frozen SHA" claim is blind to untracked working-tree files.
 
-Fix was not a new judgment: **`CLAUDE.md` is ALREADY in the fixture's
-`extra_ignore_patterns`** for precisely this reason (recorded there: its
-tool-keyword-dense entries shadow stable CHANGELOG goldens, e.g. 'broken links'
-demoted by the #47-50 release notes at v1.77.0). `docs/CLAUDE-history.md` **IS
-that content**, so trimming into it moved the shadowing prose out from under its
-own exclusion; the archive inherits the pattern. Goldens and the 0.95 gate
-UNTOUCHED — ⚠ **never fix this class by moving a golden or lowering the gate; the
-signal is correct, the corpus scope was wrong.**
+`CLAUDE.md` is in the fixture's `extra_ignore_patterns` for exactly this
+reason: its keyword-dense entries shadow stable CHANGELOG goldens (for
+example 'broken links'). ⚠ **Never fix this class by moving a golden or
+lowering the gate; the signal is correct, the corpus scope was wrong.** It
+WILL recur for any new large doc added at a new path.
 
-Every future batch trimmed into `docs/CLAUDE-history.md` stays excluded, so this
-will not recur for that file. It WILL recur for any new large doc added at a new
-path ([[feedback_fixture_query_corpus_pollution]]).
+## Release notes
 
-## Release history
-
-⚠ **This file keeps the THREE newest dated `## vX.Y.Z` sections. Everything
-older is in `docs/CLAUDE-history.md`** — v1.148.0 rotated there 2026-10-20, v1.147.1 on 2026-10-19, v1.147.0 on 2026-10-18, v1.146.0 on 2026-10-17, v1.145.5 on 2026-10-16, v1.145.4 on 2026-10-15, v1.145.3, v1.145.2 and v1.145.1 rotated there 2026-10-14, v1.145.0 on 2026-10-12, v1.144.0 and v1.143.0 on 2026-10-06, v1.142.0 on 2026-09-24, v1.141.0 on 2026-09-21, v1.140.0 and v1.139.1 on 2026-09-19, v1.139.0 and v1.138.0 on 2026-09-17, v1.137.1 on 2026-09-01, v1.137.0 on 2026-08-30,
-v1.116.0 through v1.135.0 on 2026-08-29, v1.115.0 and earlier on 2026-07-25. `CHANGELOG.md` covers most of
-them, but 1.67.0-1.92.0 and 1.96.0 exist ONLY in the history file.
-
-⚠⚠ **The archive is NOT loaded into a session.** What each rotated entry EARNED
-was lifted into "Lessons from rotated entries" above before it moved, so the
-rule is here and only the evidence is there. **A split with no pointer is a
-deletion** — that is what this paragraph is for. `tests/test_brief_bindings.py`
-asserts the pointer exists, that at most three dated sections remain, and that
-every heading present at the previous commit now lives in exactly one of the two
-files.
-
-⚠⚠ **Never quote an open-issue count, an open-PR count or a timebox date from
-the archive.** Those are the only facts in it with a guaranteed expiry date. Run
-the query.
-
-⚠⚠ **The rotation now has a GATE: `tests/test_claude_md_size.py`.** This file is
-budgeted at 130,000 chars against the 150,000 the harness will load, and today it
-is ~101,600 with 27 embedded release sections making up 96% of it. When the gate
-fires, move the OLDEST `## vX.Y.Z` sections into `docs/CLAUDE-history.md`.
-**Rotate, never delete** — every version here also exists in `CHANGELOG.md`, but
-four sections carry analysis the CHANGELOG does not.
-
-⚠⚠ **Rotate into THAT path, not a new one.** The replay self-fixture indexes
-`repo_path: "."`, so a large markdown file at a new path joins the retrieval
-corpus and outranks the goldens — measured once at nDCG 0.906 against a 0.95 gate
-with recall still 1.0. `CLAUDE.md` and `docs/CLAUDE-history.md` are both in the
-fixture's `extra_ignore_patterns`, and the gate asserts it for every whole-repo
-fixture. ⚠ jcodemunch-mcp rotates into a ROOT-LEVEL `ISSUE-HISTORY.md`; copying
-that choice here is the specific mistake the gate exists to stop.
-
-⚠ **The sibling repo is why this exists.** jcm's `CLAUDE.md` hit 200,543 chars
-and stopped loading on 2026-08-21 while its size practice was being followed —
-the practice named one section and the growth was everywhere else. **A rule that
-names one section licenses every other section to grow**, and a budget stated
-only in prose is not a budget.
+Per-release notes live in `CHANGELOG.md`.
 
 ## Purpose
 Documentation section indexing for the jMunch suite. Companion to jcodemunch-mcp (which owns code symbols). Do NOT add code/docstring parsing here.
