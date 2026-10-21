@@ -306,6 +306,15 @@ def test_public_brief_carries_no_internal_markers(marker):
     )
 
 
+@pytest.mark.parametrize("marker", INTERNAL_MARKERS)
+def test_release_skill_carries_no_internal_markers(marker):
+    """The tracked release checklist is public too (it is in the repo, though not
+    in the sdist), so it holds neutral steps only."""
+    skill = (ROOT / ".claude" / "skills" / "release" / "SKILL.md").read_text(encoding="utf-8")
+    hits = [ln for ln in skill.splitlines() if re.search(marker, ln)]
+    assert not hits, f"{marker!r} marks maintainer-internal content in SKILL.md: {hits[:3]}"
+
+
 def test_the_marker_scan_fires_on_internal_text():
     """Non-vacuity: every marker matches a line it exists to catch."""
     samples = ["per jjg on the thread", "J's call", "ask the Chief of Staff",
