@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed - an index name can no longer take another index's sidecar file (#196)
+
+Reported by @williamblair333, with a reproduction for both outcomes. An
+index's main file is `<name>.json`, so an index named `X.summary` or
+`X.related` wrote its main file onto the sidecar of the index named `X`.
+With `.summary` the next run failed with `Indexing failed: 'owner'`; with
+`.related` it replaced X's related-sections data and reported success.
+
+`index_local` and `index_repo` now refuse a name ending in `.summary`,
+`.terms`, `.related`, `.boilerplate` or `.duplicates`, ignoring case, before
+anything is read, fetched or written. The refusal says when the name came from
+the folder or repository rather than from `name=`, and asks for a different
+`name=`. Names ending in `.embeddings` or `.postings` stay legal, since those
+sidecars are `.jsonl` files and can't collide.
+
+An index created under such a name by an earlier version still loads,
+searches and deletes as before. Re-indexing it now asks for a new name.
+
 ## [1.150.0] - 2026-10-20 - bounded memory for the watcher and the server's index cache
 
 Both fixes come from @DreDay4u's #189, which measured them on a Linux

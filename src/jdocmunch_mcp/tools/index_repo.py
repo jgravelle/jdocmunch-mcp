@@ -12,7 +12,11 @@ from ..parser import parse_file, preprocess_content, ALL_EXTENSIONS
 from ..parser.sections import duplicate_anchor_fields
 from ..security import is_secret_file
 from ..storage import DocStore
-from ..storage.doc_store import format_repo_at_sha, normalize_commit_sha
+from ..storage.doc_store import (
+    format_repo_at_sha,
+    normalize_commit_sha,
+    reserved_index_name_suffix,
+)
 from ..summarizer import summarize_sections
 from ..embeddings import embed_sections, get_provider_name, should_embed
 from ._embedding_coverage import attach_embedding_coverage as _attach_embedding_coverage
@@ -282,6 +286,16 @@ async def index_repo(
         index_name = source_repo if name is None else store._safe_repo_component(name, "name")
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    _reserved = reserved_index_name_suffix(index_name)
+    if _reserved:
+        origin = "" if name is not None else " (the repository name)"
+        return {
+            "success": False,
+            "error": (
+                f"Invalid name: {index_name!r}{origin} ends in {_reserved!r}, which "
+                f"this store reserves for index sidecar files. Pass a different name=."
+            ),
+        }
     repo_id = f"{owner}/{index_name}"
     source_repo_id = f"{owner}/{source_repo}"
 

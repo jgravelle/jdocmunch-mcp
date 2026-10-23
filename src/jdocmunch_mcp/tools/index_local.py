@@ -32,7 +32,11 @@ from ..security import (
     MAX_FILE_SIZE_ENV,
 )
 from ..storage import DocStore
-from ..storage.doc_store import INDEX_OWNED_SIDECAR_SUFFIXES, normalize_commit_sha
+from ..storage.doc_store import (
+    INDEX_OWNED_SIDECAR_SUFFIXES,
+    normalize_commit_sha,
+    reserved_index_name_suffix,
+)
 from ..summarizer import summarize_sections
 from ..embeddings import embed_sections, get_provider_name, should_embed
 from ._embedding_coverage import attach_embedding_coverage as _attach_embedding_coverage
@@ -130,6 +134,15 @@ def normalize_local_index_name(
     if "/" in name or "\\" in name:
         raise ValueError(f"Invalid name: {name!r}")
     return name
+
+
+def _reserved_name_error(repo_name: str, suffix: str, explicit: bool) -> str:
+    """The refusal for a name that would collide with a sidecar (#196)."""
+    origin = "" if explicit else " (derived from the folder name)"
+    return (
+        f"Invalid name: {repo_name!r}{origin} ends in {suffix!r}, which this "
+        f"store reserves for index sidecar files. Pass a different name=."
+    )
 
 
 def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
@@ -1930,6 +1943,9 @@ def index_local(
         repo_name = normalize_local_index_name(name, folder_path.name, str(folder_path))
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    _reserved = reserved_index_name_suffix(repo_name)
+    if _reserved:
+        return {"success": False, "error": _reserved_name_error(repo_name, _reserved, bool(name))}
     owner = "local"
     repo_id = f"{owner}/{repo_name}"
 
