@@ -93,6 +93,25 @@ INDEX_OWNED_SIDECAR_SUFFIXES = (
     ".postings.jsonl",
 )
 
+# Name endings an index may not take (#196). An index's primary file is
+# `<name>.json`, so a name ending in `.summary` would put that file on top of
+# the `.summary.json` sidecar of the index named by the rest of the name.
+# Only the `.json` sidecars can collide: `<name>.json` never equals a `.jsonl`
+# path. Compared case-insensitively because Windows and macOS stores are.
+RESERVED_INDEX_NAME_SUFFIXES = tuple(
+    s[: -len(".json")] for s in INDEX_OWNED_SIDECAR_SUFFIXES if s.endswith(".json")
+)
+
+
+def reserved_index_name_suffix(name: str):
+    """Return the reserved ending `name` carries, or None (#196)."""
+    lowered = name.lower()
+    for suffix in RESERVED_INDEX_NAME_SUFFIXES:
+        if lowered.endswith(suffix):
+            return suffix
+    return None
+
+
 # The subset that `list_repos`'s `*/*.json` glob can actually match, so the
 # candidate filter never stats for a suffix the glob cannot produce.
 _SIDECAR_SUFFIXES_MATCHING_JSON_GLOB = tuple(
