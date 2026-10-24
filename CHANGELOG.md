@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.150.1] - 2026-10-23 - index names can no longer take a sidecar's file
+
 ### Fixed - an index name can no longer take another index's sidecar file (#196)
 
 Reported by @williamblair333, with a reproduction for both outcomes. An

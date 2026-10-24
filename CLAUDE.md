@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.150.0 |
+**Version:** 1.150.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the rest of
@@ -59,6 +59,13 @@ version it came from; `CHANGELOG.md` has that release's full entry.
 
 **Writing a fix**
 
+- ⚠ **An index's main file and its sidecars share one directory, so a
+  name is a path.** `X.related` as a name wrote `X.related.json`, which
+  is the related sidecar of `X` (#196). `RESERVED_INDEX_NAME_SUFFIXES` is
+  derived from `INDEX_OWNED_SIDECAR_SUFFIXES`, so a new `.json` sidecar is
+  reserved on arrival. The refusal sits in the index tools, not in
+  `_safe_repo_component`: an old index under such a name must still load
+  and delete. (v1.150.1)
 - ⚠⚠ **A measurement needs a control saying the thing ran.** The first
   FastEmbed timing for a watch child (1.4 s) came from a child whose model
   file was missing: `embedding_provider_error` was set and nothing was
