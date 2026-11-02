@@ -225,7 +225,7 @@ docs/ ──► parser (per format) ──► section tree ──► local index
                           MCP client ◄── retrieval ◄──┘
 ```
 
-- **Parsing** is per format, one module each: Markdown/MDX, reStructuredText, AsciiDoc, Jupyter notebooks, HTML, plain text, OpenAPI (YAML), JSON/JSONC, XML/SVG/XHTML, Godot scenes, and — via the optional `[office]` extra — PDF, DOCX, PPTX, and EPUB.
+- **Parsing** is per format, one module each: Markdown/MDX, reStructuredText, AsciiDoc, Org-mode, Jupyter notebooks, HTML, plain text, OpenAPI (YAML), JSON/JSONC, XML/SVG/XHTML, Godot scenes, and — via the optional `[office]` extra — PDF, DOCX, PPTX, and EPUB.
 - **Storage** is a versioned local index (`INDEX_VERSION = 3`) that auto-migrates on first load. A 1.x release never forces a reindex.
 - **Retrieval** is lexical BM25 by default, hybrid when embeddings are available.
 - **Embeddings are optional and provider-agnostic** — Gemini, OpenAI, an OpenAI-compatible endpoint, or a local offline model through either FastEmbed (ONNX) or sentence-transformers (torch). Without one, search stays lexical and entirely offline.
