@@ -72,9 +72,9 @@ _DYN_OPEN_RE = re.compile(r"^\s*#\+BEGIN:(?:\s|$)", re.IGNORECASE)
 _DYN_CLOSE_RE = re.compile(r"^\s*#\+END:\s*$", re.IGNORECASE)
 _FIXED_WIDTH_RE = re.compile(r"^\s*:( |$)")
 _COMMENT_LINE_RE = re.compile(r"^\s*#( |$)")
-_ESCAPED_LINE_RE = re.compile(r"^(\s*),(\*|#\+)")
+_ESCAPED_LINE_RE = re.compile(r"^(\s*),(?=,*(?:\*|#\+))")
 
-_PRIORITY_RE = re.compile(r"^\[#([^\]\s])\]\s*")
+_PRIORITY_RE = re.compile(r"^\[#([^\]\s]+)\]\s*")
 _TAGS_RE = re.compile(r"(?:^|\s+)(:[\w@#%:]+:)\s*$")
 _COOKIE_RE = re.compile(r"\s*\[(?:\d+/\d+|\d+%)\]")
 _TODO_FAST_ACCESS_RE = re.compile(r"\(.*?\)$")
@@ -330,6 +330,15 @@ def parse_org(content: str, doc_path: str, repo: str) -> list:
             if root_keywords:
                 meta["keywords"] = dict(root_keywords)
             tags = list(root_tags)
+            # A property drawer at the top of the file (comment and blank
+            # lines may precede it) holds file-level properties.
+            texts = [t for _, t, _ in cur_lines]
+            j = 0
+            while j < len(texts) and (not texts[j].strip() or _COMMENT_LINE_RE.match(texts[j])):
+                j += 1
+            props, _ = _property_drawer(texts, j)
+            if props is not None:
+                meta["properties"] = props
         else:
             # Planning line directly under the headline, then a drawer.
             texts = [t for _, t, _ in cur_lines]
@@ -415,7 +424,7 @@ def parse_org(content: str, doc_path: str, repo: str) -> list:
             if close and close.group(1).lower() == name:
                 if name == "src":
                     body_lines = [t for _, t, _ in cur_lines[first_idx:]]
-                    unescaped = [_ESCAPED_LINE_RE.sub(r"\1\2", t) for t in body_lines]
+                    unescaped = [_ESCAPED_LINE_RE.sub(r"\1", t) for t in body_lines]
                     cur_blocks.append({
                         "lang": lang,
                         "content": "\n".join(unescaped) + ("\n" if body_lines else ""),
@@ -453,7 +462,8 @@ def parse_org(content: str, doc_path: str, repo: str) -> list:
                             cur_title = value or stem
                         if key == "filetags":
                             root_tags = _parse_filetags(value)
-                        if key not in _KEYWORDS_NOT_RECORDED and key not in root_keywords:
+                        if (key not in _KEYWORDS_NOT_RECORDED and not key.startswith("attr_")
+                                and key not in root_keywords):
                             root_keywords[key] = value
                     kind = "blank"
 

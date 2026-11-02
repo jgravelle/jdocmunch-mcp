@@ -510,6 +510,10 @@ class TestOrgParser:
         sec = self._by_title("* TODO [#A] Urgent\n")["Urgent"]
         assert sec.metadata["org"]["priority"] == "A"
 
+    def test_numeric_priority_cookie(self):
+        sec = self._by_title("* TODO [#12] Numbered\n")["Numbered"]
+        assert sec.metadata["org"]["priority"] == "12"
+
     def test_statistics_cookie_removed_from_title(self):
         by = self._by_title("* Tasks [2/5]\n* Progress [40%] here\n")
         assert "Tasks" in by
@@ -587,6 +591,16 @@ class TestOrgParser:
         sec = self._by_title("* N\n:PROPERTIES:\n:CUSTOM_ID: x\nno end line\n")["N"]
         assert "properties" not in sec.metadata.get("org", {})
 
+    def test_file_level_property_drawer_on_root(self):
+        content = "# -*- mode: org -*-\n:PROPERTIES:\n:ID: file-id\n:END:\n#+TITLE: T\n\n* A\n"
+        root = parse_org(content, "d.org", "r")[0]
+        assert root.metadata["org"]["properties"] == {"ID": "file-id"}
+        assert root.title == "T"
+
+    def test_affiliated_attr_keywords_are_not_file_metadata(self):
+        root = parse_org("#+TITLE: T\n#+ATTR_HTML: :width 100\n#+CAPTION: c\n[[./img.png]]\n* A\n", "d.org", "r")[0]
+        assert root.metadata["org"]["keywords"] == {"title": "T"}
+
     def test_logbook_drawer_is_plain_content(self):
         sec = self._by_title(self._fixture(), "sample.org")["Advanced Usage"]
         assert "CLOCK:" in sec.content
@@ -610,6 +624,10 @@ class TestOrgParser:
         sec = self._by_title(self._fixture(), "sample.org")["Prerequisites"]
         assert "\n* not a headline" in sec.code_blocks[0]["content"]
         assert ",* not a headline" in sec.content
+
+    def test_double_comma_escape_loses_one_comma(self):
+        sec = self._by_title("* S\n#+BEGIN_SRC org\n,,* two commas\n,#+TITLE: x\n#+END_SRC\n")["S"]
+        assert sec.code_blocks[0]["content"] == ",* two commas\n#+TITLE: x\n"
 
     def test_block_name_is_case_insensitive(self):
         sec = self._by_title("* S\n#+begin_src sh\necho hi\n#+end_src\n")["S"]
