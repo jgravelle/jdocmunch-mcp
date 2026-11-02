@@ -64,9 +64,19 @@ from .sections import _IDENT_RE
 # an inline task, not an outline node.
 INLINE_TASK_MIN_STARS = 15
 
+# Every pattern here runs on single lines of untrusted files, and jdoc has no
+# per-file time limit for text formats, so each one must stay linear in the
+# line's length. A lazy ``(.*?)`` before ``\s*$``, a ``\s+`` that a later
+# ``\s*`` can share, or an unbounded scan from every opener makes a long line
+# quadratic (a 96,000-character line took 27 to 37 s). ``_VALUE`` captures a
+# keyword's value stripped, without the lazy scan.
+# tests/test_parser.py::TestOrgParser::test_long_line_parses_in_linear_time
+# pins one long line per pattern.
+_VALUE = r"(?:\s+(\S(?:.*\S)?))?\s*$"
+
 _HEADLINE_RE = re.compile(r"^(\*+) (.*)$")
-_KEYWORD_RE = re.compile(r"^\s*#\+([A-Za-z_][A-Za-z0-9_\-]*):(?:\s+(.*?))?\s*$")
-_BLOCK_OPEN_RE = re.compile(r"^\s*#\+BEGIN_([A-Za-z0-9_\-]+)(?:\s+(.*?))?\s*$", re.IGNORECASE)
+_KEYWORD_RE = re.compile(r"^\s*#\+([A-Za-z_][A-Za-z0-9_\-]*):" + _VALUE)
+_BLOCK_OPEN_RE = re.compile(r"^\s*#\+BEGIN_([A-Za-z0-9_\-]+)" + _VALUE, re.IGNORECASE)
 _BLOCK_CLOSE_RE = re.compile(r"^\s*#\+END_([A-Za-z0-9_\-]+)\s*$", re.IGNORECASE)
 _DYN_OPEN_RE = re.compile(r"^\s*#\+BEGIN:(?:\s|$)", re.IGNORECASE)
 _DYN_CLOSE_RE = re.compile(r"^\s*#\+END:\s*$", re.IGNORECASE)
@@ -75,9 +85,9 @@ _COMMENT_LINE_RE = re.compile(r"^\s*#( |$)")
 _ESCAPED_LINE_RE = re.compile(r"^(\s*),(?=,*(?:\*|#\+))")
 
 _PRIORITY_RE = re.compile(r"^\[#([^\]\s]+)\]\s*")
-_TAGS_RE = re.compile(r"(?:^|\s+)(:[\w@#%:]+:)\s*$")
-_COOKIE_RE = re.compile(r"\s*\[(?:\d+/\d+|\d+%)\]")
-_TODO_FAST_ACCESS_RE = re.compile(r"\(.*?\)$")
+_TAGS_RE = re.compile(r"(?:^|\s)(:[\w@#%:]+:)$")  # input is already stripped
+_COOKIE_RE = re.compile(r"(?<!\s)\s*\[(?:\d+/\d+|\d+%)\]")  # starts only where a run of spaces does
+_TODO_FAST_ACCESS_RE = re.compile(r"^([^(]*)\(.*\)$")  # keeps group 1, the keyword
 
 _TIMESTAMP = r"(?:<[^>\n]*>|\[[^\]\n]*\])(?:--(?:<[^>\n]*>|\[[^\]\n]*\]))?"
 _PLANNING_ITEM_RE = re.compile(r"(SCHEDULED|DEADLINE|CLOSED):\s*(" + _TIMESTAMP + ")")
@@ -86,12 +96,12 @@ _PLANNING_LINE_RE = re.compile(
 )
 _DRAWER_OPEN_RE = re.compile(r"^\s*:PROPERTIES:\s*$", re.IGNORECASE)
 _DRAWER_CLOSE_RE = re.compile(r"^\s*:END:\s*$", re.IGNORECASE)
-_PROPERTY_RE = re.compile(r"^\s*:([^\s:]+?)\+?:(?:\s+(.*?))?\s*$")
+_PROPERTY_RE = re.compile(r"^\s*:([^\s:]+?)\+?:" + _VALUE)
 
 _ORG_LINK_RE = re.compile(r"\[\[([^\[\]]+?)\](?:\[[^\[\]]*\])?\]")
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):")
 _INCLUDE_RE = re.compile(r'^\s*#\+INCLUDE:\s*(?:"([^"]+)"|(\S+))', re.IGNORECASE)
-_INLINE_SPAN_RE = re.compile(r"(?<![\w=~])([=~])(\S(?:[^\n]*?\S)?)\1(?![\w=~])")
+_INLINE_SPAN_RE = re.compile(r"(?<![\w=~])([=~])(\S(?:[^\n]{0,500}?\S)?)\1(?![\w=~])")
 
 # Blocks whose body is not prose: blanked before reference / tag / inline-code
 # extraction. QUOTE, VERSE and CENTER blocks are prose and stay.
@@ -143,12 +153,12 @@ def _todo_keywords(lines: list) -> tuple:
         if not custom:
             todo, done, custom = [], [], True
         value = kw.group(2) or ""
-        words = [_TODO_FAST_ACCESS_RE.sub("", w) for w in value.split()]
+        words = [_TODO_FAST_ACCESS_RE.sub(r"\1", w) for w in value.split()]
         words = [w for w in words if w and w != "|"]
         if "|" in value:
             left, right = value.split("|", 1)
-            todo += [_TODO_FAST_ACCESS_RE.sub("", w) for w in left.split()]
-            done += [_TODO_FAST_ACCESS_RE.sub("", w) for w in right.split()]
+            todo += [_TODO_FAST_ACCESS_RE.sub(r"\1", w) for w in left.split()]
+            done += [_TODO_FAST_ACCESS_RE.sub(r"\1", w) for w in right.split()]
         elif words:
             todo += words[:-1]
             done.append(words[-1])

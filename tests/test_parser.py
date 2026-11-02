@@ -1,5 +1,7 @@
 """Tests for the parser module."""
 
+import time
+
 import pytest
 from pathlib import Path
 
@@ -719,6 +721,36 @@ class TestOrgParser:
     def test_commented_fixture_headline(self):
         sec = self._by_title(self._fixture(), "sample.org")["Scratch"]
         assert sec.metadata["org"]["commented"] is True
+
+    # One long line per pattern that was quadratic in the line's length (PR
+    # #200 review). At 96,000 characters the quadratic forms took 12 to 37 s
+    # each and the linear ones take under 0.2 s, so the budget sits well
+    # clear of both on a slow runner.
+    _LONG = 96_000
+    _LONG_LINE_BUDGET_S = 3.0
+    _LONG_LINE_DOCS = {
+        "inline_span": "* H\n\n" + " =x" * (_LONG // 3) + "\n",
+        "headline_tags_and_cookie": "* a" + " " * _LONG + "b\n",
+        "keyword": "#+TITLE: a" + " " * _LONG + "b\n\n* H\n",
+        "block_open": "* H\n#+BEGIN_SRC a" + " " * _LONG + "b\ncode\n#+END_SRC\n",
+        "property": "* H\n:PROPERTIES:\n:P: a" + " " * _LONG + "b\n:END:\n",
+        "todo_fast_access": "#+TODO: " + "(" * _LONG + "\n\n* H\n",
+    }
+
+    @pytest.mark.parametrize("case", sorted(_LONG_LINE_DOCS))
+    def test_long_line_parses_in_linear_time(self, case):
+        start = time.perf_counter()
+        secs = parse_org(self._LONG_LINE_DOCS[case], "doc.org", "repo")
+        elapsed = time.perf_counter() - start
+        assert secs
+        assert elapsed < self._LONG_LINE_BUDGET_S, f"{case}: {elapsed:.1f}s"
+
+    def test_long_line_values_still_read(self):
+        root = parse_org("#+TITLE:  a" + " " * 500 + "b  \n\n* H\n", "doc.org", "repo")[0]
+        assert root.title == "a" + " " * 500 + "b"
+        sec = self._by_title("* H\n:PROPERTIES:\n:P:   v  w   \n:END:\n")["H"]
+        assert sec.metadata["org"]["properties"]["P"] == "v  w"
+        assert self._by_title("* Head" + " " * 500 + ":t:\n")["Head"].tags == ["t"]
 
 
 
