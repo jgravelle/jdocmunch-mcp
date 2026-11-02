@@ -3,6 +3,7 @@
 from .markdown_parser import parse_markdown, strip_mdx
 from .rst_parser import parse_rst
 from .asciidoc_parser import parse_asciidoc
+from .org_parser import parse_org
 from .notebook_parser import convert_notebook
 from .html_parser import convert_html
 from .openapi_parser import convert_openapi, sniff_openapi
@@ -25,6 +26,7 @@ ALL_EXTENSIONS = {
     ".adoc": "asciidoc",
     ".asciidoc": "asciidoc",
     ".asc": "asciidoc",
+    ".org": "org",
     ".ipynb": "notebook",
     ".html": "html",
     ".htm": "html",
@@ -119,6 +121,8 @@ def parse_file(content: str, doc_path: str, repo: str) -> list:
         sections = parse_rst(content, doc_path, repo)
     elif doc_type == "asciidoc":
         sections = parse_asciidoc(content, doc_path, repo)
+    elif doc_type == "org":
+        sections = parse_org(content, doc_path, repo)
     elif doc_type in ("notebook", "html"):
         # content already preprocessed to markdown by preprocess_content()
         sections = parse_markdown(content, doc_path, repo)
