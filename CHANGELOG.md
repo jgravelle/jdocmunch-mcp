@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added - Org-mode files are indexed (#199)
+
+`.org` files are parsed natively by `parser/org_parser.py`, following Org's
+own syntax rules rather than a Markdown analogy. Headlines are the section
+boundaries. The TODO keyword, priority cookie, COMMENT marker, statistics
+cookies and trailing tags are removed from the title before the slug is built,
+so flipping TODO to DONE never changes a section id; custom keywords from
+`#+TODO:` lines are honoured. Tags go to `tags`; planning lines and the
+`:PROPERTIES:` drawer go to `metadata.org`, and a `CUSTOM_ID` becomes the
+section anchor so `[[#custom-id]]` targets resolve. `#+BEGIN_SRC` blocks
+become `code_blocks` with comma escapes undone. A headline inside a block is a
+headline, as in Org. A reference is recorded only for a target the index can
+check: `file:` and path targets, `#custom-id`, URLs and `#+INCLUDE:` paths.
+`id:`, `*Headline`, fuzzy and command targets are not recorded. The stored
+mirror is verbatim, so the PreToolUse hook treats `.org` like `.md`.
+
 ## [1.150.1] - 2026-10-23 - index names can no longer take a sidecar's file
 
 ### Fixed - an index name can no longer take another index's sidecar file (#196)

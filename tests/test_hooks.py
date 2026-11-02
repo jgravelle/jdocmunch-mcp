@@ -139,6 +139,12 @@ class TestPreToolUse:
         assert self._run({"tool_input": {"file_path": str(p)}}) == 0
         assert "search_sections" in self._context(capsys.readouterr())
 
+    def test_warns_on_large_org(self, tmp_path, monkeypatch, capsys):
+        p = self._indexed(tmp_path, monkeypatch, "doc.org",
+                          "#+TITLE: Big\n\n* Section\n\n" + "x " * 3000)
+        assert self._run({"tool_input": {"file_path": str(p)}}) == 0
+        assert "search_sections" in self._context(capsys.readouterr())
+
     def test_handles_invalid_json(self):
         from jdocmunch_mcp.cli.hooks import run_pretooluse
         with mock.patch("sys.stdin", io.StringIO("not json")):

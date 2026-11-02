@@ -1,0 +1,75 @@
+#+TITLE: My Org Document
+#+AUTHOR: J. Gravelle
+#+DATE: <2026-11-02 Mon>
+#+FILETAGS: :notes:org:
+#+TODO: TODO NEXT(n) | DONE CANCELLED(c)
+#+INCLUDE: "shared/setup.org"
+
+This is the document preamble. The keywords above describe the file; see
+[[https://orgmode.org/manual/][the Org manual]] for the syntax.
+
+* Introduction                                                        :intro:
+
+Org uses leading stars for headlines. One star is level 1, two stars are
+level 2, and so on without limit.
+
+* TODO [#A] Installation [1/2]                                        :setup:
+SCHEDULED: <2026-11-03 Tue>
+:PROPERTIES:
+:CUSTOM_ID: install
+:ID:       0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0
+:END:
+
+Install via the package manager of your choice.
+
+** Prerequisites
+
+Make sure you have Python 3.10 or later installed.
+
+#+BEGIN_SRC python
+import sys
+,* not a headline: the comma escapes the star
+print("https://example.com/in-code")
+#+END_SRC
+
+*** Quick Install
+
+#+BEGIN_EXAMPLE
+pip install mypackage
+,#+TITLE: an escaped keyword
+#+END_EXAMPLE
+
+: fixed-width line mentioning https://example.com/fixed
+
+**** Verifying the Install
+
+See [[file:guide.org::*Config][the config guide]], [[#install]],
+[[https://example.com/docs][the docs]], [[./other.org]], [[id:0f1e2d3c][by id]],
+[[*Introduction][the intro]] and <https://example.com/angle>.
+
+Run =mypackage_version= or ~mypackage.check~ to confirm.
+
+* COMMENT Scratch
+
+Nothing here is exported.
+
+* DONE Advanced Usage
+CLOSED: [2026-11-01 Sun 10:00]
+:LOGBOOK:
+CLOCK: [2026-11-01 Sun 09:00]--[2026-11-01 Sun 10:00] =>  1:00
+:END:
+
+Some advanced content lives here.
+
+*************** TODO An inline task
+Inline tasks are not outline nodes.
+*************** END
+
+* API Reference
+
+# A comment line; its #ignored tag does not count
+Full API documentation follows. #api
+
+* Séction Ünicode
+
+Cöntent with UTF-8.

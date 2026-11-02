@@ -36,6 +36,7 @@ _DOC_EXTENSIONS: set[str] = {
     ".txt",
     ".rst",
     ".adoc", ".asciidoc", ".asc",
+    ".org",
     ".ipynb",
     ".html", ".htm",
     ".yaml", ".yml",
@@ -64,6 +65,7 @@ _VERBATIM_MIRROR_EXTENSIONS = frozenset({
     ".txt",
     ".rst",
     ".adoc", ".asciidoc", ".asc",
+    ".org",
     ".yaml", ".yml",
 })
 

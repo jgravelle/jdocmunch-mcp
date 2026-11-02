@@ -123,6 +123,7 @@ The parser follows a **format dispatch pattern**. File extension determines whic
 | `.mdx`                           | Markdown    | JSX tags, frontmatter, import/export stripped first         |
 | `.rst`                           | RST         | Adornment-character heading levels (overline + underline)   |
 | `.adoc`                          | AsciiDoc    | `=` through `======` heading hierarchy                      |
+| `.org`                           | Org         | Star headlines; TODO keywords, tags, planning, properties, src blocks |
 | `.html`                          | HTML        | `<h1>`–`<h6>` headings; boilerplate stripped                |
 | `.ipynb`                         | Notebook    | Markdown cells as sections; code cells appended as content  |
 | `.yaml`, `.yml` (OpenAPI/Swagger)| OpenAPI     | Operations grouped by tag                                   |

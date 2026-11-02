@@ -145,6 +145,7 @@ _FORMAT_FIXTURES = {
     "guide.mdx": "# MDX guide\n\n<Note>Hello</Note>\n\nbody markdownx content\n",
     "guide.rst": "Guide\n=====\n\nSetup\n-----\n\nInstall the package.\n",
     "guide.adoc": "= Guide\n\n== Setup\n\nInstall the package.\n",
+    "guide.org": "#+TITLE: Guide\n\n* Setup\n\nInstall the package.\n",
     "guide.html": "<html><body><h1>Guide</h1><p>Install the package.</p></body></html>",
     "guide.txt": "Guide\nInstall the package.\n",
     "data.json": '{"name": "Guide", "setup": "Install the package."}',
@@ -168,7 +169,7 @@ _FORMAT_FIXTURES = {
 def test_format_extensions_registered():
     """Every format in the regression set must map to a parser key."""
     expected_extensions = {
-        ".md", ".mdx", ".rst", ".adoc", ".html", ".txt",
+        ".md", ".mdx", ".rst", ".adoc", ".org", ".html", ".txt",
         ".json", ".xml", ".tscn", ".yaml",
     }
     for ext in expected_extensions:

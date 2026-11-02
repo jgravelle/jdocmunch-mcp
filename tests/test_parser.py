@@ -1,5 +1,7 @@
 """Tests for the parser module."""
 
+import time
+
 import pytest
 from pathlib import Path
 
@@ -7,6 +9,7 @@ from jdocmunch_mcp.parser.sections import slugify, resolve_slug_collision, make_
 from jdocmunch_mcp.parser.markdown_parser import parse_markdown
 from jdocmunch_mcp.parser.rst_parser import parse_rst
 from jdocmunch_mcp.parser.asciidoc_parser import parse_asciidoc
+from jdocmunch_mcp.parser.org_parser import parse_org
 from jdocmunch_mcp.parser.notebook_parser import convert_notebook
 from jdocmunch_mcp.parser.html_parser import convert_html
 from jdocmunch_mcp.parser.text_parser import parse_text
@@ -393,6 +396,364 @@ class TestAsciiDocParser:
         assert prereqs.parent_id == install.id
 
 
+class TestOrgParser:
+    """Org-mode (#199). The fixture `sample.org` exercises every construct the
+    parser reads; the inline cases pin single behaviours."""
+
+    @staticmethod
+    def _fixture():
+        return (FIXTURES / "docs" / "sample.org").read_text(encoding="utf-8")
+
+    def _by_title(self, content, doc_path="doc.org", repo="repo"):
+        return {s.title: s for s in parse_org(content, doc_path, repo)}
+
+    # -- headlines, levels, root --------------------------------------------
+
+    def test_basic_headings(self):
+        content = "Preamble.\n\n* Section\n\nBody.\n\n** Sub\n\nMore.\n"
+        titles = [s.title for s in parse_org(content, "doc.org", "repo")]
+        assert titles == ["doc", "Section", "Sub"]
+
+    def test_levels_are_star_counts_including_odd_gaps(self):
+        content = "* H1\n*** H3\n***** H5\n** H2\n"
+        by = {s.title: s.level for s in parse_org(content, "doc.org", "repo")}
+        assert by == {"doc": 0, "H1": 1, "H3": 3, "H5": 5, "H2": 2}
+
+    def test_star_without_space_is_not_a_headline(self):
+        content = "* Real\n*bold* text at line start\n**also not**\n"
+        titles = [s.title for s in parse_org(content, "doc.org", "repo")]
+        assert titles == ["doc", "Real"]
+
+    def test_stars_without_a_space_are_not_a_headline(self):
+        # Org syntax: STARS must be "ended by a space character".
+        titles = [s.title for s in parse_org("*\nplain\n**\n* Real\n", "doc.org", "repo")]
+        assert titles == ["doc", "Real"]
+
+    def test_root_title_from_title_keyword(self):
+        secs = parse_org("#+title: Lower Case Keyword\n\n* A\n", "notes.org", "repo")
+        assert secs[0].level == 0
+        assert secs[0].title == "Lower Case Keyword"
+
+    def test_root_title_falls_back_to_stem(self):
+        secs = parse_org("No title here.\n\n* A\n", "notes.org", "repo")
+        assert secs[0].title == "notes"
+
+    def test_root_always_emitted_like_the_other_parsers(self):
+        secs = parse_org("* A\n\nbody\n", "doc.org", "repo")
+        assert secs[0].level == 0 and (secs[0].byte_start, secs[0].byte_end) == (0, 0)
+
+    def test_inline_task_is_not_a_headline(self):
+        by = self._by_title(self._fixture(), "sample.org")
+        assert "An inline task" not in by
+        assert "END" not in by
+        assert "Inline tasks are not outline nodes." in by["Advanced Usage"].content
+
+    def test_byte_offsets_slice_equals_content(self):
+        content = self._fixture()
+        raw = content.encode("utf-8")
+        secs = parse_org(content, "sample.org", "test/docs")
+        assert secs, "no sections"
+        for sec in secs:
+            assert raw[sec.byte_start:sec.byte_end].decode("utf-8") == sec.content
+        assert secs[-1].byte_end == len(raw)
+
+    def test_content_hash_populated(self):
+        for sec in parse_org("* Title\n\nHello.\n", "doc.org", "repo"):
+            assert sec.content_hash != ""
+
+    def test_unique_ids(self):
+        ids = [s.id for s in parse_org("* Foo\n\nFirst.\n\n* Foo\n\nSecond.\n", "doc.org", "repo")]
+        assert len(ids) == len(set(ids))
+
+    def test_fixture_titles_and_levels(self):
+        by = {s.title: s.level for s in parse_org(self._fixture(), "sample.org", "test/docs")}
+        assert by["My Org Document"] == 0
+        assert by["Introduction"] == 1
+        assert by["Installation"] == 1
+        assert by["Prerequisites"] == 2
+        assert by["Quick Install"] == 3
+        assert by["Verifying the Install"] == 4
+        assert by["Séction Ünicode"] == 1
+
+    # -- headline keywords, cookies, tags -----------------------------------
+
+    def test_todo_keyword_stripped_and_recorded(self):
+        sec = self._by_title("* TODO Write tests\n")["Write tests"]
+        assert sec.metadata["org"]["todo"] == "TODO"
+        assert sec.metadata["org"]["todo_type"] == "todo"
+
+    def test_done_keyword_is_done_type(self):
+        sec = self._by_title("* DONE Ship it\n")["Ship it"]
+        assert sec.metadata["org"]["todo"] == "DONE"
+        assert sec.metadata["org"]["todo_type"] == "done"
+
+    def test_custom_todo_keywords_from_file(self):
+        content = "#+TODO: TODO NEXT(n) | DONE CANCELLED(c)\n* NEXT Call\n* CANCELLED Meeting\n"
+        by = self._by_title(content)
+        assert by["Call"].metadata["org"]["todo"] == "NEXT"
+        assert by["Call"].metadata["org"]["todo_type"] == "todo"
+        assert by["Meeting"].metadata["org"]["todo"] == "CANCELLED"
+        assert by["Meeting"].metadata["org"]["todo_type"] == "done"
+
+    def test_todo_line_without_bar_makes_last_keyword_done(self):
+        by = self._by_title("#+SEQ_TODO: OPEN CLOSED\n* CLOSED Ticket\n")
+        assert by["Ticket"].metadata["org"]["todo_type"] == "done"
+
+    def test_unknown_word_is_not_a_keyword(self):
+        by = self._by_title("* Next steps\n")
+        assert "Next steps" in by
+        assert "org" not in by["Next steps"].metadata
+
+    def test_keyword_match_is_case_sensitive(self):
+        by = self._by_title("* Todo list\n")
+        assert "Todo list" in by
+
+    def test_priority_cookie(self):
+        sec = self._by_title("* TODO [#A] Urgent\n")["Urgent"]
+        assert sec.metadata["org"]["priority"] == "A"
+
+    def test_numeric_priority_cookie(self):
+        sec = self._by_title("* TODO [#12] Numbered\n")["Numbered"]
+        assert sec.metadata["org"]["priority"] == "12"
+
+    def test_statistics_cookie_removed_from_title(self):
+        by = self._by_title("* Tasks [2/5]\n* Progress [40%] here\n")
+        assert "Tasks" in by
+        assert "Progress here" in by
+
+    def test_tags_extracted_and_removed_from_title(self):
+        sec = self._by_title("* Install :setup:a_b:@home:\n")["Install"]
+        assert sec.tags == ["setup", "a_b", "@home"]
+
+    def test_archive_tag_sets_archived(self):
+        sec = self._by_title("* Old :ARCHIVE:\n")["Old"]
+        assert sec.metadata["org"]["archived"] is True
+
+    def test_comment_keyword(self):
+        sec = self._by_title("* COMMENT Scratch\n")["Scratch"]
+        assert sec.metadata["org"]["commented"] is True
+
+    def test_comment_must_be_a_whole_word(self):
+        by = self._by_title("* COMMENTARY on things\n")
+        assert "COMMENTARY on things" in by
+
+    def test_section_id_stable_across_todo_flip_and_tag_change(self):
+        a = self._by_title("* TODO [#A] Install [0/2] :setup:\n")["Install"]
+        b = self._by_title("* DONE Install [2/2] :setup:done:\n")["Install"]
+        c = self._by_title("* Install\n")["Install"]
+        assert a.id == b.id == c.id
+
+    def test_filetags_on_root_both_forms(self):
+        colon = parse_org("#+FILETAGS: :notes:org:\n* A\n", "d.org", "r")[0]
+        spaced = parse_org("#+filetags: notes org\n* A\n", "d.org", "r")[0]
+        assert colon.tags == ["notes", "org"]
+        assert spaced.tags == ["notes", "org"]
+
+    def test_fixture_installation_headline(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Installation"]
+        org = sec.metadata["org"]
+        assert org["todo"] == "TODO" and org["priority"] == "A"
+        assert sec.tags == ["setup"]
+
+    # -- planning lines and drawers -----------------------------------------
+
+    def test_planning_line_metadata(self):
+        content = ("* Task\nSCHEDULED: <2026-11-03 Tue> DEADLINE: <2026-11-10 Tue>\n"
+                   "* Done\nCLOSED: [2026-11-01 Sun 10:00]\n")
+        by = self._by_title(content)
+        assert by["Task"].metadata["org"]["scheduled"] == "<2026-11-03 Tue>"
+        assert by["Task"].metadata["org"]["deadline"] == "<2026-11-10 Tue>"
+        assert by["Done"].metadata["org"]["closed"] == "[2026-11-01 Sun 10:00]"
+
+    def test_planning_line_must_follow_the_headline(self):
+        by = self._by_title("* Task\n\nSCHEDULED: <2026-11-03 Tue>\n")
+        assert "scheduled" not in by["Task"].metadata.get("org", {})
+
+    def test_properties_drawer_parsed(self):
+        content = "* Node\n:PROPERTIES:\n:CUSTOM_ID: node-one\n:Effort:   1:00\n:END:\nBody.\n"
+        sec = self._by_title(content)["Node"]
+        assert sec.metadata["org"]["properties"] == {"CUSTOM_ID": "node-one", "Effort": "1:00"}
+
+    def test_drawer_after_planning_line(self):
+        content = "* Node\nSCHEDULED: <2026-11-03 Tue>\n:PROPERTIES:\n:CUSTOM_ID: x\n:END:\n"
+        sec = self._by_title(content)["Node"]
+        assert sec.metadata["org"]["properties"]["CUSTOM_ID"] == "x"
+
+    def test_custom_id_becomes_anchor(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Installation"]
+        assert sec.anchor == "install"
+        assert sec.metadata["org"]["properties"]["ID"] == "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+
+    def test_unsafe_custom_id_is_not_an_anchor(self):
+        sec = self._by_title("* N\n:PROPERTIES:\n:CUSTOM_ID: 1-bad id\n:END:\n")["N"]
+        assert sec.anchor == ""
+        assert sec.metadata["org"]["properties"]["CUSTOM_ID"] == "1-bad id"
+
+    def test_unterminated_drawer_is_not_a_drawer(self):
+        sec = self._by_title("* N\n:PROPERTIES:\n:CUSTOM_ID: x\nno end line\n")["N"]
+        assert "properties" not in sec.metadata.get("org", {})
+
+    def test_file_level_property_drawer_on_root(self):
+        content = "# -*- mode: org -*-\n:PROPERTIES:\n:ID: file-id\n:END:\n#+TITLE: T\n\n* A\n"
+        root = parse_org(content, "d.org", "r")[0]
+        assert root.metadata["org"]["properties"] == {"ID": "file-id"}
+        assert root.title == "T"
+
+    def test_affiliated_attr_keywords_are_not_file_metadata(self):
+        root = parse_org("#+TITLE: T\n#+ATTR_HTML: :width 100\n#+CAPTION: c\n[[./img.png]]\n* A\n", "d.org", "r")[0]
+        assert root.metadata["org"]["keywords"] == {"title": "T"}
+
+    def test_logbook_drawer_is_plain_content(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Advanced Usage"]
+        assert "CLOCK:" in sec.content
+        assert "properties" not in sec.metadata["org"]
+        assert sec.metadata["org"]["closed"] == "[2026-11-01 Sun 10:00]"
+
+    # -- blocks -------------------------------------------------------------
+
+    def test_src_block_code_blocks_shape(self):
+        content = self._fixture()
+        sec = self._by_title(content, "sample.org", "test/docs")["Prerequisites"]
+        assert len(sec.code_blocks) == 1
+        blk = sec.code_blocks[0]
+        assert blk["block_id"] == sec.id + "::code#0"
+        assert blk["lang"] == "python"
+        raw = content.encode("utf-8")[blk["byte_start"]:blk["byte_end"]].decode("utf-8")
+        assert raw.startswith("import sys\n")
+        assert ",* not a headline" in raw
+
+    def test_comma_escape_unescaped_in_code_block_only(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Prerequisites"]
+        assert "\n* not a headline" in sec.code_blocks[0]["content"]
+        assert ",* not a headline" in sec.content
+
+    def test_double_comma_escape_loses_one_comma(self):
+        sec = self._by_title("* S\n#+BEGIN_SRC org\n,,* two commas\n,#+TITLE: x\n#+END_SRC\n")["S"]
+        assert sec.code_blocks[0]["content"] == ",* two commas\n#+TITLE: x\n"
+
+    def test_block_name_is_case_insensitive(self):
+        sec = self._by_title("* S\n#+begin_src sh\necho hi\n#+end_src\n")["S"]
+        assert sec.code_blocks[0]["lang"] == "sh"
+
+    def test_src_block_without_language(self):
+        sec = self._by_title("* S\n#+BEGIN_SRC\nraw\n#+END_SRC\n")["S"]
+        assert sec.code_blocks[0]["lang"] == ""
+
+    def test_headline_inside_src_block_is_a_headline(self):
+        # org-element: a headline cannot be contained in any element.
+        content = "* S\n#+BEGIN_SRC text\n* Not escaped\n#+END_SRC\n"
+        by = self._by_title(content)
+        assert "Not escaped" in by
+        assert by["S"].code_blocks == []
+
+    def test_url_inside_src_or_example_or_fixed_width_is_not_a_reference(self):
+        by = self._by_title(self._fixture(), "sample.org")
+        assert "https://example.com/in-code" not in by["Prerequisites"].references
+        assert "https://example.com/fixed" not in by["Quick Install"].references
+
+    def test_example_block_escaped_keyword_does_not_set_title(self):
+        secs = parse_org("#+BEGIN_EXAMPLE\n,#+TITLE: nope\n#+END_EXAMPLE\n* A\n", "d.org", "r")
+        assert secs[0].title == "d"
+
+    def test_keyword_inside_block_is_block_content(self):
+        secs = parse_org("#+BEGIN_SRC org\n#+TITLE: nope\n#+END_SRC\n* A\n", "d.org", "r")
+        assert secs[0].title == "d"
+
+    # -- references, inline code, tags from the body ------------------------
+
+    def test_references_kinds(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Verifying the Install"]
+        assert sec.references == [
+            "guide.org",
+            "#install",
+            "https://example.com/docs",
+            "./other.org",
+            "https://example.com/angle",
+        ]
+
+    def test_fuzzy_and_unresolvable_links_are_dropped(self):
+        content = "* S\n[[Some heading]] [[*Head]] [[id:abc]] [[attachment:x.png]] [[elisp:(kill-emacs)]] [[shell:rm -rf /]]\n"
+        assert self._by_title(content)["S"].references == []
+
+    def test_file_link_variants(self):
+        content = "* S\n[[file:a.org]] [[file+emacs:b.org::12]] [[../c.org::#x]] [[/abs/d.org]] [[~/e.org]]\n"
+        assert self._by_title(content)["S"].references == ["a.org", "b.org", "../c.org", "/abs/d.org", "~/e.org"]
+
+    def test_include_keyword_is_a_reference(self):
+        root = parse_org(self._fixture(), "sample.org", "r")[0]
+        assert "shared/setup.org" in root.references
+        assert "https://orgmode.org/manual/" in root.references
+
+    def test_include_unquoted_and_with_options(self):
+        root = parse_org('#+INCLUDE: other.org :minlevel 2\n#+INCLUDE: "q.org" src python\n* A\n', "d.org", "r")[0]
+        assert root.references == ["other.org", "q.org"]
+
+    def test_include_inside_a_body_section(self):
+        sec = self._by_title('* S\n#+INCLUDE: "parts/one.org"\ntext\n')["S"]
+        assert sec.references == ["parts/one.org"]
+
+    def test_inline_code_from_verbatim_and_code_spans(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Verifying the Install"]
+        assert sec.inline_code == ["mypackage_version", "mypackage.check"]
+
+    def test_inline_code_skips_non_identifiers(self):
+        sec = self._by_title("* S\nUse =a b= or ~x()~ or =ok_name=.\n")["S"]
+        assert sec.inline_code == ["ok_name"]
+
+    def test_hashtags_in_body_union_with_heading_tags(self):
+        sec = self._by_title("* S :one:\nbody #two and #one again\n")["S"]
+        assert sec.tags == ["one", "two"]
+
+    def test_comment_line_blanked_from_prose(self):
+        sec = self._by_title(self._fixture(), "sample.org")["API Reference"]
+        assert sec.tags == ["api"]
+        assert "# A comment line" in sec.content
+
+    def test_preamble_keywords_metadata(self):
+        root = parse_org(self._fixture(), "sample.org", "r")[0]
+        kw = root.metadata["org"]["keywords"]
+        assert kw["title"] == "My Org Document"
+        assert kw["author"] == "J. Gravelle"
+        assert kw["date"] == "<2026-11-02 Mon>"
+        assert "todo" not in kw and "filetags" not in kw
+        assert root.tags == ["notes", "org"]
+
+    def test_commented_fixture_headline(self):
+        sec = self._by_title(self._fixture(), "sample.org")["Scratch"]
+        assert sec.metadata["org"]["commented"] is True
+
+    # One long line per pattern that was quadratic in the line's length (PR
+    # #200 review). At 96,000 characters the quadratic forms took 12 to 37 s
+    # each and the linear ones take under 0.2 s, so the budget sits well
+    # clear of both on a slow runner.
+    _LONG = 96_000
+    _LONG_LINE_BUDGET_S = 3.0
+    _LONG_LINE_DOCS = {
+        "inline_span": "* H\n\n" + " =x" * (_LONG // 3) + "\n",
+        "headline_tags_and_cookie": "* a" + " " * _LONG + "b\n",
+        "keyword": "#+TITLE: a" + " " * _LONG + "b\n\n* H\n",
+        "block_open": "* H\n#+BEGIN_SRC a" + " " * _LONG + "b\ncode\n#+END_SRC\n",
+        "property": "* H\n:PROPERTIES:\n:P: a" + " " * _LONG + "b\n:END:\n",
+        "todo_fast_access": "#+TODO: " + "(" * _LONG + "\n\n* H\n",
+    }
+
+    @pytest.mark.parametrize("case", sorted(_LONG_LINE_DOCS))
+    def test_long_line_parses_in_linear_time(self, case):
+        start = time.perf_counter()
+        secs = parse_org(self._LONG_LINE_DOCS[case], "doc.org", "repo")
+        elapsed = time.perf_counter() - start
+        assert secs
+        assert elapsed < self._LONG_LINE_BUDGET_S, f"{case}: {elapsed:.1f}s"
+
+    def test_long_line_values_still_read(self):
+        root = parse_org("#+TITLE:  a" + " " * 500 + "b  \n\n* H\n", "doc.org", "repo")[0]
+        assert root.title == "a" + " " * 500 + "b"
+        sec = self._by_title("* H\n:PROPERTIES:\n:P:   v  w   \n:END:\n")["H"]
+        assert sec.metadata["org"]["properties"]["P"] == "v  w"
+        assert self._by_title("* Head" + " " * 500 + ":t:\n")["Head"].tags == ["t"]
+
+
+
 class TestParseFileDispatcher:
     def test_md_dispatch(self):
         content = "# Title\n\nContent.\n"
@@ -426,6 +787,25 @@ class TestParseFileDispatcher:
         assert len(sections) > 0
         titles = [s.title for s in sections]
         assert "Title" in titles
+
+    def test_org_dispatches_to_org_parser(self):
+        content = (FIXTURES / "docs" / "sample.org").read_text(encoding="utf-8")
+        sections = parse_file(preprocess_content(content, "sample.org"), "sample.org", "test/docs")
+        by_title = {s.title: s for s in sections}
+        assert by_title["Prerequisites"].parent_id == by_title["Installation"].id
+        assert by_title["Quick Install"].parent_id == by_title["Prerequisites"].id
+        assert by_title["Introduction"].parent_id == by_title["My Org Document"].id
+
+    def test_org_odd_levels_wire_to_nearest_shallower_headline(self):
+        sections = parse_file("* A\n*** C\n***** E\n** B\n", "odd.org", "repo")
+        by_title = {s.title: s for s in sections}
+        assert by_title["C"].parent_id == by_title["A"].id
+        assert by_title["E"].parent_id == by_title["C"].id
+        assert by_title["B"].parent_id == by_title["A"].id
+
+    def test_org_is_left_verbatim_by_preprocess(self):
+        org = "#+TITLE: T\n\n* A\n"
+        assert preprocess_content(org, "doc.org") == org
 
 
 class TestNotebookParser:
