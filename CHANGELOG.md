@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.151.0] - 2026-11-04 - Org-mode files are indexed
+
 ### Added - Org-mode files are indexed (#199)
 
 `.org` files are parsed natively by `parser/org_parser.py`, following Org's
@@ -17,6 +19,14 @@ headline, as in Org. A reference is recorded only for a target the index can
 check: `file:` and path targets, `#custom-id`, URLs and `#+INCLUDE:` paths.
 `id:`, `*Headline`, fuzzy and command targets are not recorded. The stored
 mirror is verbatim, so the PreToolUse hook treats `.org` like `.md`.
+
+### Changed - the README states who needs a license (#201)
+
+The README said individual developers need no license, which read as covering
+paid freelance work and contradicted the line above it. It now says personal
+and other non-commercial use is free, and that work use at a for-profit
+company, or client or paid work, needs a license, paid once. The license terms
+themselves are unchanged.
 
 ## [1.150.1] - 2026-10-23 - index names can no longer take a sidecar's file
 
