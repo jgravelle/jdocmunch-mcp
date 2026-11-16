@@ -1734,7 +1734,9 @@ class _OcrState:
         if not has_readable_text(content):
             return True
         try:
-            return self._ocr.pdf_has_textless_pages(file_path, self.max_pages)
+            # Detect across the whole document; the cap limits OCR work,
+            # not detection (#203).
+            return self._ocr.pdf_has_textless_pages(file_path, 0)
         except Exception:
             return False
 
@@ -1762,7 +1764,7 @@ class _OcrState:
         if res.pages_capped:
             self.capped.append(rel_path)
             warnings.append(
-                f"OCR read the first {self.max_pages} pages of {rel_path}; "
+                f"OCR read the first {self.max_pages} scanned pages of {rel_path}; "
                 f"{res.pages_capped} more were not read (raise ocr_max_pages to include them)."
             )
         if res.ocr_pages:
@@ -1907,7 +1909,9 @@ def index_local(
             0 = unlimited, which the CLI uses). A document that can't finish
             is skipped as ``ocr_budget_exhausted`` and resumes on the next
             call from its per-page cache.
-        ocr_max_pages: per-document page cap for OCR (default 50).
+        ocr_max_pages: per-document cap on scanned pages OCR reads
+            (default 50). Every page is checked for a text layer; a scanned
+            page past the cap is skipped as ``ocr_pages_capped``.
 
     Returns:
         Dict with indexing results. Includes a `changes` list with one

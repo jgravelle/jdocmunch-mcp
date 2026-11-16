@@ -357,7 +357,7 @@ class OcrDocResult:
     engine: str = ""
     seconds: float = 0.0
     pages_total: int = 0
-    pages_capped: int = 0                                # pages past max_pages, not read
+    pages_capped: int = 0                                # scanned pages past max_pages, not OCR'd
     complete: bool = True                                # False when the budget ran out mid-document
 
 
@@ -379,6 +379,10 @@ def ocr_pdf(path: Path, engine: _Engine, budget: Budget, *,
             render: Optional[Callable] = None) -> OcrDocResult:
     """Read a PDF page by page: keep each page's own text layer, OCR the rest.
 
+    ``max_pages`` caps how many scanned pages are OCR'd (0 = no cap), never
+    which pages are looked at: every page's text layer is kept, and a scanned
+    page past the cap is counted in ``pages_capped`` and left out (#203).
+
     Returns the document as Markdown with one ``## Page N`` section per page,
     plus byte spans of the OCR'd pages. ``complete`` is False when the budget
     ran out before every needed page was read; pages already read are cached
@@ -390,13 +394,12 @@ def ocr_pdf(path: Path, engine: _Engine, budget: Budget, *,
     file_sha = hashlib.sha256(data).hexdigest()
     pdf = pdfium.PdfDocument(data)
     total = len(pdf)
-    limit = min(total, max_pages) if max_pages and max_pages > 0 else total
-    parts: list = []
-    result = OcrDocResult(text="", engine=engine.identity, pages_total=total,
-                          pages_capped=max(0, total - limit))
+    cap = max_pages if max_pages and max_pages > 0 else None
+    result = OcrDocResult(text="", engine=engine.identity, pages_total=total)
     t0 = time.monotonic()
     page_texts: list = []
-    for i in range(limit):
+    scanned_seen = 0
+    for i in range(total):
         page = pdf[i]
         own = ""
         try:
@@ -406,6 +409,10 @@ def ocr_pdf(path: Path, engine: _Engine, budget: Budget, *,
             own = ""
         if any(ch.isalnum() for ch in own):
             page_texts.append((i + 1, own, None))
+            continue
+        scanned_seen += 1
+        if cap is not None and scanned_seen > cap:
+            result.pages_capped += 1
             continue
         cpath = _page_cache_path(cache_dir, file_sha, i + 1, engine)
         cached = None
@@ -486,10 +493,13 @@ def mark_sections(sections: list, result: OcrDocResult) -> None:
 
 
 def pdf_has_textless_pages(path, max_pages: int = DEFAULT_MAX_PAGES) -> bool:
-    """Whether any of the first ``max_pages`` pages has no readable text layer.
+    """Whether any of the first ``max_pages`` pages (0 = all) has no readable text layer.
 
     Used only when OCR is active, to send a mixed PDF (some pages scanned)
     through ``ocr_pdf`` while an all-text PDF keeps its normal conversion.
+    ``index_local`` passes 0: the text-layer check is cheap, and a cap here
+    would hide a scanned page past it from both OCR and the
+    ``ocr_pages_capped`` skip (#203).
     """
     import pypdfium2 as pdfium
 

@@ -445,7 +445,7 @@ def _all_tools() -> list[Tool]:
                     },
                     "ocr_max_pages": {
                         "type": "integer",
-                        "description": "Per-document OCR page cap (default 50); pages past it are reported, not read."
+                        "description": "Per-document cap on scanned pages OCR reads (default 50). Every page is checked for a text layer; scanned pages past the cap are reported as ocr_pages_capped, not read."
                     },
                     "include_dot_dirs": {
                         "type": "array",

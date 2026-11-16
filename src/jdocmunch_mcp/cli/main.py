@@ -333,7 +333,7 @@ def main(argv: Optional[list] = None):
     )
     il_parser.add_argument(
         "--ocr-max-pages", type=_positive_int, default=None, metavar="N",
-        help="OCR at most N pages per document (default 50)",
+        help="OCR at most N scanned pages per document (default 50)",
     )
     # jdoc#108: the MCP tool could express both of these per call and the CLI
     # could express neither, so the documented CLI route sent a private corpus

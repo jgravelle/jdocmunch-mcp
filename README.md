@@ -195,7 +195,7 @@ So an agent can't turn OCR on by itself. The choice is stored with the index, an
 JDOCMUNCH_OCR=1 jdocmunch-mcp index-local --path /path/to/scans --ocr
 ```
 
-The first 50 scanned images of a document are read (`ocr_max_pages`, `--ocr-max-pages`); the rest are reported as `ocr_pages_capped`.
+Every page is checked for a text layer. The first 50 scanned images of a document are read (`ocr_max_pages`, `--ocr-max-pages`); the rest are reported as `ocr_pages_capped`.
 
 **Privacy.** OCR runs on your machine. Tesseract is a local program, and Windows OCR is an on-device Windows API; no page leaves the machine. But OCR turns scans into searchable text. If you OCR tax forms, pay stubs, IDs or medical records, their contents (names, SSNs, account numbers) become readable to any agent that can query this index, and they're stored in the index's text cache on disk. jDocMunch's secret-file rules match file names, not contents, so they won't catch a scanned W-2. Keep such files out of indexed folders, or exclude them with `extra_ignore_patterns`.
 
