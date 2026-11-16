@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.151.0 |
+**Version:** 1.151.1 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the rest of
@@ -63,7 +63,7 @@ version it came from; `CHANGELOG.md` has that release's full entry.
   looked only at the first `ocr_max_pages` pages, so a scan on page 55 sent
   the PDF down the non-OCR path, where the `ocr_pages_capped` skip can't be
   reached, and coverage read complete (#203). The cap now counts scanned
-  pages, as the README said; detection reads every page. (Unreleased)
+  pages, as the README said; detection reads every page. (v1.151.1)
 - ⚠ **An index's main file and its sidecars share one directory, so a
   name is a path.** `X.related` as a name wrote `X.related.json`, which
   is the related sidecar of `X` (#196). `RESERVED_INDEX_NAME_SUFFIXES` is

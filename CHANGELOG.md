@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.151.1] - 2026-11-16 - OCR no longer misses a late scan in a long PDF
+
 ### Fixed - OCR no longer misses a late scan in a long PDF (#203)
 
 With `ocr=True`, only the first `ocr_max_pages` (default 50) of a PDF were
