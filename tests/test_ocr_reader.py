@@ -286,6 +286,58 @@ def test_pages_past_the_cap_are_reported(env):
     assert any("1 more were not read" in w for w in r["warnings"])
 
 
+def _typed_converter(env):
+    env.mp.setattr(office, "_get_converter", lambda: types.SimpleNamespace(
+        convert=lambda p: types.SimpleNamespace(text_content="Native text.")))
+
+
+def _late_scan(scanned, pages=60):
+    return [(f"p{n}", "" if n in scanned else f"Native text page {n}")
+            for n in range(1, pages + 1)]
+
+
+def test_a_scanned_page_past_the_cap_is_detected_and_read(env):
+    # #203: 60 pages, only page 55 scanned, default cap of 50. Detection
+    # looked at the first 50 pages only, so the PDF took the normal path, page
+    # 55 was never read, and coverage still read complete.
+    env.mp.setenv("JDOCMUNCH_OCR", "1")
+    _typed_converter(env)
+    _pdf(env.docs, "late-scan.pdf", _late_scan({55}))
+    r = _index(env, ocr=True)
+    assert env.engine.calls == ["p55"]
+    assert r["ocr"]["used"] is True and r["ocr"]["pages"] == 1
+    assert r["coverage_complete"] is True
+    assert "ocr_pages_capped" not in (r.get("skip_counts") or {})
+    _, secs = _sections(env, "late-scan.pdf")
+    titles = {s["title"] for s in secs}
+    assert {"Page 1", "Page 55", "Page 60"} <= titles
+    page55 = [s for s in secs if s["title"] == "Page 55"][0]
+    assert page55["text_source"] == "ocr" and page55["ocr_pages"] == [55]
+
+
+def test_scanned_pages_beyond_the_cap_are_reported_and_text_pages_kept(env):
+    env.mp.setenv("JDOCMUNCH_OCR", "1")
+    _typed_converter(env)
+    _pdf(env.docs, "late-scan.pdf", _late_scan({52, 55, 58}))
+    r = _index(env, ocr=True, ocr_max_pages=2)
+    assert env.engine.calls == ["p52", "p55"]
+    assert r["skip_counts"]["ocr_pages_capped"] == 1
+    assert r["coverage_complete"] is False
+    assert any("1 more were not read" in w for w in r["warnings"])
+    _, secs = _sections(env, "late-scan.pdf")
+    titles = {s["title"] for s in secs}
+    # The cap limits OCR work only: every text-layer page is still indexed.
+    assert {"Page 51", "Page 59", "Page 60"} <= titles
+    assert "Page 58" not in titles
+
+
+def test_textless_detection_with_no_cap_reads_every_page(env):
+    _pdf(env.docs, "late-scan.pdf", _late_scan({55}))
+    path = env.docs / "late-scan.pdf"
+    assert ocr.pdf_has_textless_pages(path, max_pages=50) is False
+    assert ocr.pdf_has_textless_pages(path, max_pages=0) is True
+
+
 def test_no_engine_keeps_the_skip_and_names_why(env):
     env.mp.setenv("JDOCMUNCH_OCR", "1")
     env.mp.setattr(ocr, "detect_engine", lambda env=None: (None, "no OCR engine found (x)"))

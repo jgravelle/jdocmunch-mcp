@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed - OCR no longer misses a late scan in a long PDF (#203)
+
+With `ocr=True`, only the first `ocr_max_pages` (default 50) of a PDF were
+checked for a missing text layer. A PDF whose first scan sat later took the
+normal conversion path, so the scan was never read, no skip was recorded, and
+`coverage_complete` read true. The text-layer check now covers the whole
+document, which is cheap. The cap now counts scans, as the README already
+said: the first 50 scanned images are read, and the rest are skipped as
+`ocr_pages_capped`, so `coverage_complete` reads false. Text past the cap is
+now kept too; before, a PDF that went through OCR lost everything past it.
+Thanks to @tmhtech4 for the report and a self-contained reproduction.
+
 ## [1.151.0] - 2026-11-04 - Org-mode files are indexed
 
 ### Added - Org-mode files are indexed (#199)
