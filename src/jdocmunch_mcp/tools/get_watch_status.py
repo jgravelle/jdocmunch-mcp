@@ -18,10 +18,22 @@ def get_watch_status(storage_path: Optional[str] = None) -> dict:
 
     # Login-service state (best-effort; never raises out of a status probe).
     try:
-        from ..service_installer import service_status
-        service = service_status()
+        from .. import service_installer
+        service = service_installer.service_status()
     except Exception as exc:  # noqa: BLE001 - status must not crash on a probe
-        service = {"active": False, "error": str(exc)}
+        # A probe that raised observed nothing: unknown, never inactive (#206).
+        service = {
+            "active": None, "status": "unknown", "probe_error": "probe_failed",
+            "detail": str(exc), "error": str(exc),
+        }
+    status = service.get("status", "unknown")
+    # True only for a watcher seen running, False only for one seen stopped or
+    # absent, None when the probe could not tell (#206).
+    installed_active = (
+        True if status == "active"
+        else False if status in ("inactive", "not_installed")
+        else None
+    )
 
     watchable = discover_local_doc_repos(storage_path)
     watchable_roots = {root for root, _name in watchable}
@@ -56,7 +68,8 @@ def get_watch_status(storage_path: Optional[str] = None) -> dict:
 
     return {
         "service": {
-            "installed_active": bool(service.get("active")),
+            "installed_active": installed_active,
+            "status": status,
             "platform": service.get("platform"),
             "detail": service,
         },

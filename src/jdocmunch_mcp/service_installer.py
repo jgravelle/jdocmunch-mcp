@@ -205,15 +205,84 @@ def _uninstall_systemd() -> dict:
     return {"platform": "systemd", "unit": str(unit_path), "removed": removed}
 
 
+# What `systemctl is-active` prints when it reached the service manager. Any
+# other output (an empty stdout, a bus or permission error on stderr) means the
+# query did not happen, so the service's state is UNKNOWN, never inactive (#206).
+_SYSTEMD_ACTIVE_STATES = frozenset({"active", "reloading", "refreshing"})
+# `unknown` is what older systemd (219, RHEL/CentOS 7) prints for a unit it
+# never loaded: a query that succeeded, settled by the unit-file check below.
+_SYSTEMD_INACTIVE_STATES = frozenset(
+    {"inactive", "failed", "activating", "deactivating", "maintenance", "unknown"}
+)
+_PROBE_TIMEOUT_SECONDS = 5.0
+
+
+def _systemd_probe_error(stderr: str) -> str:
+    """A stable class for a probe that did not reach the user's service manager."""
+    low = stderr.lower()
+    if "permission denied" in low or "access denied" in low:
+        return "permission_denied"
+    if (
+        "dbus_session_bus_address" in low
+        or "xdg_runtime_dir" in low
+        or "user scope bus" in low
+        or "failed to connect to bus" in low
+    ):
+        return "no_user_bus"
+    return "probe_failed"
+
+
 def _status_systemd() -> dict:
+    """The watch service's state on systemd: `active`, `inactive`,
+    `not_installed` or `unknown`.
+
+    `active` is None when the probe could not ask. A process started without
+    the user's session bus (`DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`) gets
+    a bus error and a nonzero exit, and reading that as inactive told the user
+    a running watcher was stopped (#206). The state is read from what
+    `is-active` printed, never from its exit code.
+    """
     if shutil.which("systemctl") is None:
-        return {"platform": "systemd", "active": False, "reason": "systemctl not found"}
-    result = subprocess.run(
-        ["systemctl", "--user", "is-active", f"{SERVICE_NAME}.service"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    )
-    state = result.stdout.strip() or result.stderr.strip()
-    return {"platform": "systemd", "active": state == "active", "state": state}
+        # The installer refuses without systemctl, so no unit of ours can run.
+        return {
+            "platform": "systemd", "active": False, "status": "not_installed",
+            "reason": "systemctl not found",
+        }
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", f"{SERVICE_NAME}.service"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "platform": "systemd", "active": None, "status": "unknown",
+            "probe_error": "timeout",
+            "detail": f"systemctl --user is-active did not answer in {_PROBE_TIMEOUT_SECONDS:g} s",
+        }
+    except OSError as exc:
+        return {
+            "platform": "systemd", "active": None, "status": "unknown",
+            "probe_error": "probe_failed", "detail": str(exc),
+        }
+    out = (result.stdout or "").strip()
+    err = (result.stderr or "").strip()
+    state = out.splitlines()[0].strip() if out else ""
+    if state in _SYSTEMD_ACTIVE_STATES:
+        return {"platform": "systemd", "active": True, "status": "active", "state": state}
+    if state in _SYSTEMD_INACTIVE_STATES:
+        installed = _systemd_unit_path().exists()
+        return {
+            "platform": "systemd", "active": False,
+            "status": "inactive" if installed else "not_installed",
+            "state": state,
+        }
+    return {
+        "platform": "systemd", "active": None, "status": "unknown",
+        "probe_error": _systemd_probe_error(err),
+        "state": out or err,
+        "detail": err or out or f"systemctl --user is-active exited {result.returncode} with no output",
+    }
 
 
 # ── launchd (macOS) ─────────────────────────────────────────────────────────
@@ -282,11 +351,48 @@ def _uninstall_launchd() -> dict:
 
 
 def _status_launchd() -> dict:
-    result = subprocess.run(
-        ["launchctl", "list", LAUNCHD_LABEL],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    )
-    return {"platform": "launchd", "active": result.returncode == 0, "detail": result.stdout.strip()}
+    """`active` keeps its meaning (the job is loaded); `status` is read from
+    what `launchctl` said, never from its exit code alone. A label launchd
+    does not know is `inactive` when our plist exists and `not_installed`
+    when it does not; any other failure is `unknown` (#206)."""
+    try:
+        result = subprocess.run(
+            ["launchctl", "list", LAUNCHD_LABEL],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "platform": "launchd", "active": None, "status": "unknown",
+            "probe_error": "timeout",
+            "detail": f"launchctl list did not answer in {_PROBE_TIMEOUT_SECONDS:g} s",
+        }
+    except OSError as exc:
+        return {
+            "platform": "launchd", "active": None, "status": "unknown",
+            "probe_error": "probe_failed", "detail": str(exc),
+        }
+    out = (result.stdout or "").strip()
+    err = (result.stderr or "").strip()
+    if result.returncode == 0:
+        # Loaded. A job with no `"PID" =` line is loaded but not running.
+        running = '"PID" =' in out
+        return {
+            "platform": "launchd", "active": True,
+            "status": "active" if running else "inactive", "detail": out,
+        }
+    if "could not find service" in (err + " " + out).lower():
+        installed = _launchd_plist_path().exists()
+        return {
+            "platform": "launchd", "active": False,
+            "status": "inactive" if installed else "not_installed",
+            "detail": err or out,
+        }
+    return {
+        "platform": "launchd", "active": None, "status": "unknown",
+        "probe_error": "permission_denied" if "permission" in err.lower() else "probe_failed",
+        "detail": err or out or f"launchctl list exited {result.returncode} with no output",
+    }
 
 
 # ── Task Scheduler (Windows) ────────────────────────────────────────────────
@@ -321,13 +427,67 @@ def _uninstall_windows() -> dict:
     return {"platform": "schtasks", "task": SERVICE_NAME, "removed": result.returncode == 0}
 
 
-def _status_windows() -> dict:
-    result = subprocess.run(
-        ["schtasks", "/Query", "/TN", SERVICE_NAME, "/FO", "LIST"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+def _watch_task_registered() -> Optional[bool]:
+    """Whether the watch task is registered: True, False, or None when that
+    could not be asked. The answer is a fixed token the script prints, so it
+    does not depend on the display language."""
+    # `absent` only for Get-ScheduledTask's own not-found error id, which is
+    # invariant across display languages. A missing cmdlet is also category
+    # ObjectNotFound, so the category alone is not enough. Any other failure
+    # prints `error` and reads as unknown, never as a task that is not there.
+    script = (
+        f"try {{ $null = Get-ScheduledTask -TaskName '{SERVICE_NAME}' -ErrorAction Stop; 'present' }}"
+        " catch { if ($_.FullyQualifiedErrorId -like '*_NotFound_*,Get-ScheduledTask') { 'absent' } else { 'error' } }"
     )
-    active = "Running" in result.stdout or "Ready" in result.stdout
-    return {"platform": "schtasks", "active": active, "detail": result.stdout.strip()[:400]}
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, check=False, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.debug("Get-ScheduledTask existence probe failed", exc_info=True)
+        return None
+    if result.returncode != 0:
+        return None
+    word = (result.stdout or b"").decode("ascii", errors="replace").strip()
+    if word == "present":
+        return True
+    if word == "absent":
+        return False
+    return None
+
+
+def _status_windows() -> dict:
+    """`schtasks` prints its state in the system's display language, so an
+    English `Running`/`Ready` is read as active and anything else is
+    `unknown`, never `inactive` (#206). A task that is not registered is
+    `not_installed`, read from a language-independent probe."""
+    try:
+        result = subprocess.run(
+            ["schtasks", "/Query", "/TN", SERVICE_NAME, "/FO", "LIST"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+        out = (result.stdout or "").strip()
+        rc = result.returncode
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("schtasks query failed", exc_info=True)
+        out, rc = str(exc), None
+    if rc == 0 and ("Running" in out or "Ready" in out):
+        return {
+            "platform": "schtasks", "active": True, "status": "active",
+            "state_source": "display_text", "detail": out[:400],
+        }
+    if _watch_task_registered() is False:
+        return {
+            "platform": "schtasks", "active": False, "status": "not_installed",
+            "detail": out[:400],
+        }
+    return {
+        "platform": "schtasks", "active": False, "status": "unknown",
+        "state_source": "display_text", "detail": out[:400],
+    }
 
 
 # ── Public dispatch ─────────────────────────────────────────────────────────
@@ -362,14 +522,22 @@ def uninstall_service() -> dict:
 
 
 def service_status() -> dict:
+    """The watch service's state. Every answer carries `status`: `active`,
+    `inactive`, `not_installed` or `unknown`, read from what the probe said
+    and never from an exit code alone (#206). `active` keeps each platform's
+    existing meaning and is None where the systemd or launchd probe could not
+    ask. A reader that needs the classification reads `status`."""
     sys_ = platform.system()
     if sys_ == "Linux":
-        return _status_systemd()
-    if sys_ == "Darwin":
-        return _status_launchd()
-    if sys_ == "Windows":
-        return _status_windows()
-    return {"platform": sys_, "active": False, "reason": "unsupported"}
+        out = _status_systemd()
+    elif sys_ == "Darwin":
+        out = _status_launchd()
+    elif sys_ == "Windows":
+        out = _status_windows()
+    else:
+        out = {"platform": sys_, "active": False, "status": "not_installed", "reason": "unsupported"}
+    out.setdefault("status", "unknown")
+    return out
 
 
 # ── escaping helpers ────────────────────────────────────────────────────────

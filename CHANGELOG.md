@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed - a watch-service probe that could not ask reads as unknown, not as stopped (#206)
+
+On Linux, `get_watch_status` asks `systemctl --user is-active` whether the
+watch service runs. That needs the user's session bus. A process started
+without `DBUS_SESSION_BUS_ADDRESS` or `XDG_RUNTIME_DIR` (a managed MCP host,
+a cron job, an ssh shell) gets "Failed to connect to user scope bus" and a
+nonzero exit. The probe compared the output with `active`, so a probe that
+observed nothing published `active: false` and `installed_active: false`, and
+an operator read a running watcher as stopped. Reported by @dkiaulakis.
+
+Every service answer now carries `status`: `active`, `inactive`,
+`not_installed` or `unknown`, read from what the probe printed and never from
+an exit code alone. On systemd, `active` is `None` for `unknown`, with a stable
+`probe_error` (`no_user_bus`, `permission_denied`, `timeout`, `probe_failed`)
+and the diagnostic kept in `detail`. A successful query for an inactive unit
+is `inactive` when the unit file exists and `not_installed` when it does not.
+The probe has a 5 second timeout. On macOS, a label `launchctl` does not know
+is `inactive` or `not_installed` by whether the plist exists, and any other
+failure is `unknown`. On Windows, the localized `schtasks` text is never read
+as `inactive`, and a task that is not registered is `not_installed`, read
+from a language-independent probe. `get_watch_status` publishes `status`
+beside `installed_active`, which is now `null` when the probe could not tell.
+
 ## [1.151.1] - 2026-11-16 - OCR no longer misses a late scan in a long PDF
 
 ### Fixed - OCR no longer misses a late scan in a long PDF (#203)
