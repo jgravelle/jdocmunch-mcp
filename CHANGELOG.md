@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.151.2] - 2026-11-18 - a watch-service probe that could not ask reads as unknown, not as stopped
+
 ### Fixed - a watch-service probe that could not ask reads as unknown, not as stopped (#206)
 
 On Linux, `get_watch_status` asks `systemctl --user is-active` whether the
