@@ -257,7 +257,10 @@ def test_windows_english_text_on_a_failed_query_is_not_trusted(monkeypatch):
 
 @pytest.mark.parametrize(
     "state,active,status",
-    [("Running", True, "active"), ("Ready", True, "active"), ("Disabled", False, "inactive")],
+    [
+        ("Running", True, "active"), ("Ready", True, "active"), ("Queued", True, "active"),
+        ("Disabled", False, "inactive"),
+    ],
 )
 def test_windows_a_localized_task_is_read_from_its_state(monkeypatch, state, active, status):
     """German display text, so only the State enum can answer."""

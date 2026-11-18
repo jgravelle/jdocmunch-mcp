@@ -15,8 +15,8 @@ an operator read a running watcher as stopped. Reported by @dkiaulakis.
 Every service answer now carries `status`: `active`, `inactive`,
 `not_installed` or `unknown`, read from what the probe printed and never from
 an exit code alone. When the probe could not ask, `active` is `null`, with a
-stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout`,
-`probe_failed`) and the diagnostic kept in `detail`. On systemd, a successful
+stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout` and
+`probe_failed` on Linux and macOS; `probe_failed` on Windows) and the diagnostic kept in `detail`. On systemd, a successful
 query for an inactive unit is `inactive` when the unit file exists and
 `not_installed` when it does not, and a unit still `activating` (an
 auto-restart loop) counts as `inactive`. The probe has a 5 second timeout. On
@@ -26,7 +26,7 @@ task the English `schtasks` text does not show as running is read from
 Get-ScheduledTask's `State`, which does not depend on the display language: a
 `Disabled` task is `inactive`, an unregistered one `not_installed`, and one
 neither probe can read `unknown`. That probe starts PowerShell, which took
-2.4 s on a Windows 11 box where the task is not installed.
+about 2.3 s on a Windows 11 box where the task is not installed.
 
 `get_watch_status` publishes `status` beside `installed_active`, and
 `installed_active` now follows it: `true` for `active`, `false` for `inactive`
