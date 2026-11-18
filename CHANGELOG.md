@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Fixed - a watch-service probe that could not ask reads as unknown, not as stopped (#206)
+
+On Linux, `get_watch_status` asks `systemctl --user is-active` whether the
+watch service runs. That needs the user's session bus. A process started
+without `DBUS_SESSION_BUS_ADDRESS` or `XDG_RUNTIME_DIR` (a managed MCP host,
+a cron job, an ssh shell) gets "Failed to connect to user scope bus" and a
+nonzero exit. The probe compared the output with `active`, so a probe that
+observed nothing published `active: false` and `installed_active: false`, and
+an operator read a running watcher as stopped. Reported by @dkiaulakis.
+
+Every service answer now carries a new `status` key: `active`, `inactive`,
+`not_installed` or `unknown`, read from what the probe printed and never from
+an exit code alone. When the probe could not ask, `status` is `unknown`, with
+a stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout` and
+`probe_failed` on Linux and macOS; `probe_failed` on Windows) and the
+diagnostic kept in `detail`. On systemd, a successful query for an inactive
+unit is `inactive` when the unit file exists and `not_installed` when it does
+not, and a unit still `activating` (an auto-restart loop) counts as
+`inactive`. The probe has a 5 second timeout. On macOS, a label `launchctl`
+does not know is `inactive` or `not_installed` by whether the plist exists, a
+loaded job with no running process is `inactive`, and any other failure is
+`unknown`. On Windows, a task the English `schtasks` text does not show as
+running is read from Get-ScheduledTask's `State`, which does not depend on the
+display language: a `Disabled` task is `inactive`, an unregistered one
+`not_installed`, and one neither probe can read `unknown`. That probe starts
+PowerShell, which took about 2.3 s on a Windows 11 box where the task is not
+installed.
+
+`get_watch_status` publishes `status` beside `installed_active`. The change is
+additive: `installed_active` and every nested `active` keep their 1.x boolean
+meaning, so a consumer that reads them sees exactly what it saw before. That
+includes reading `false` when the state is unknown, so `installed_active` on
+its own still cannot tell a stopped watcher from one the probe could not see.
+Read `status` for that.
+
 ## [1.151.1] - 2026-11-16 - OCR no longer misses a late scan in a long PDF
 
 ### Fixed - OCR no longer misses a late scan in a long PDF (#203)
