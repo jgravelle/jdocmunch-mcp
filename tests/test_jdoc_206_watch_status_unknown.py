@@ -205,49 +205,96 @@ def test_launchd_another_failure_is_unknown_not_inactive(launchd):
     assert s["probe_error"] == "probe_failed", s
 
 
-def _schtasks(monkeypatch, rc, out, registered):
-    monkeypatch.setattr(
-        si.subprocess, "run",
-        lambda args, **kw: subprocess.CompletedProcess(args, rc, out, ""),
-    )
-    monkeypatch.setattr(si, "_watch_task_registered", lambda: registered)
+def test_launchd_a_permission_failure_is_unknown(launchd):
+    plist, answer = launchd
+    plist.write_text("<plist/>")
+    answer.update(rc=1, err="Permission denied")
+    s = si._status_launchd()
+    assert s["active"] is None and s["probe_error"] == "permission_denied", s
 
 
-def test_windows_an_english_running_task_is_active(monkeypatch):
-    _schtasks(monkeypatch, 0, "TaskName: \\jdocmunch-watch\nStatus: Running\n", True)
+@pytest.mark.parametrize(
+    "exc,probe_error",
+    [(subprocess.TimeoutExpired(["launchctl"], 5), "timeout"), (OSError("no launchctl"), "probe_failed")],
+)
+def test_launchd_a_probe_that_could_not_run_is_unknown(monkeypatch, exc, probe_error):
+    def run(args, **kw):
+        assert kw.get("timeout") == si._PROBE_TIMEOUT_SECONDS
+        raise exc
+
+    monkeypatch.setattr(si.subprocess, "run", run)
+    s = si._status_launchd()
+    assert s["active"] is None and s["status"] == "unknown" and s["probe_error"] == probe_error, s
+
+
+def _windows(monkeypatch, rc, out, state, calls=None):
+    def run(args, **kw):
+        assert kw.get("timeout") == si._PROBE_TIMEOUT_SECONDS, "schtasks must have a timeout"
+        return subprocess.CompletedProcess(args, rc, out, "")
+
+    def probe():
+        if calls is not None:
+            calls.append(1)
+        return state
+
+    monkeypatch.setattr(si.subprocess, "run", run)
+    monkeypatch.setattr(si, "_scheduled_task_probe", probe)
+
+
+def test_windows_an_english_running_task_is_active_without_powershell(monkeypatch):
+    calls: list = []
+    _windows(monkeypatch, 0, "TaskName: \\jdocmunch-watch\nStatus: Running\n", None, calls)
     s = si._status_windows()
     assert s["active"] is True and s["status"] == "active", s
+    assert calls == [], "a readable English answer must not spawn PowerShell"
 
 
-def test_windows_a_display_text_it_cannot_read_is_unknown_not_inactive(monkeypatch):
-    """The display text is localized, so not finding an English word proves nothing."""
-    _schtasks(monkeypatch, 0, "Aufgabenname: \\jdocmunch-watch\nStatus: Bereit\n", True)
+def test_windows_english_text_on_a_failed_query_is_not_trusted(monkeypatch):
+    _windows(monkeypatch, 1, "Running", None)
     s = si._status_windows()
-    assert s["status"] == "unknown" and s["state_source"] == "display_text", s
+    assert s["active"] is None and s["status"] == "unknown", s
+
+
+@pytest.mark.parametrize(
+    "state,active,status",
+    [("Running", True, "active"), ("Ready", True, "active"), ("Disabled", False, "inactive")],
+)
+def test_windows_a_localized_task_is_read_from_its_state(monkeypatch, state, active, status):
+    """German display text, so only the State enum can answer."""
+    _windows(monkeypatch, 0, "Aufgabenname: \\jdocmunch-watch\nStatus: Bereit\n", state)
+    s = si._status_windows()
+    assert s["active"] is active and s["status"] == status and s["state"] == state, s
 
 
 def test_windows_a_task_that_is_not_registered_is_not_installed(monkeypatch):
-    _schtasks(monkeypatch, 1, "", False)
+    _windows(monkeypatch, 1, "", "absent")
     s = si._status_windows()
     assert s["active"] is False and s["status"] == "not_installed", s
 
 
-def test_windows_a_query_that_could_not_ask_is_unknown(monkeypatch):
-    _schtasks(monkeypatch, 1, "", None)
+def test_windows_a_task_that_could_not_be_read_is_unknown_not_inactive(monkeypatch):
+    _windows(monkeypatch, 0, "Aufgabenname: \\jdocmunch-watch\nStatus: Bereit\n", None)
     s = si._status_windows()
-    assert s["status"] == "unknown", s
+    assert s["active"] is None and s["status"] == "unknown", s
 
 
 @pytest.mark.parametrize(
-    "stdout,expected",
-    [(b"present\r\n", True), (b"absent\r\n", False), (b"", None), (b"error\r\n", None)],
+    "rc,stdout,expected",
+    [
+        (0, b"Running\r\n", "Running"),
+        (0, b"Disabled\r\n", "Disabled"),
+        (0, b"absent\r\n", "absent"),
+        (0, b"error\r\n", None),
+        (0, b"", None),
+        (1, b"absent\r\n", None),
+    ],
 )
-def test_windows_task_existence_is_read_from_a_fixed_token(monkeypatch, stdout, expected):
+def test_windows_the_task_probe_reads_a_fixed_token(monkeypatch, rc, stdout, expected):
     monkeypatch.setattr(
         si.subprocess, "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a, 0, stdout, b""),
+        lambda *a, **kw: subprocess.CompletedProcess(a, rc, stdout, b""),
     )
-    assert si._watch_task_registered() is expected
+    assert si._scheduled_task_probe() == expected
 
 
 def test_an_unsupported_platform_has_no_service(monkeypatch):

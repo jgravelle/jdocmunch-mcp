@@ -14,16 +14,28 @@ an operator read a running watcher as stopped. Reported by @dkiaulakis.
 
 Every service answer now carries `status`: `active`, `inactive`,
 `not_installed` or `unknown`, read from what the probe printed and never from
-an exit code alone. On systemd, `active` is `None` for `unknown`, with a stable
-`probe_error` (`no_user_bus`, `permission_denied`, `timeout`, `probe_failed`)
-and the diagnostic kept in `detail`. A successful query for an inactive unit
-is `inactive` when the unit file exists and `not_installed` when it does not.
-The probe has a 5 second timeout. On macOS, a label `launchctl` does not know
-is `inactive` or `not_installed` by whether the plist exists, and any other
-failure is `unknown`. On Windows, the localized `schtasks` text is never read
-as `inactive`, and a task that is not registered is `not_installed`, read
-from a language-independent probe. `get_watch_status` publishes `status`
-beside `installed_active`, which is now `null` when the probe could not tell.
+an exit code alone. When the probe could not ask, `active` is `null`, with a
+stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout`,
+`probe_failed`) and the diagnostic kept in `detail`. On systemd, a successful
+query for an inactive unit is `inactive` when the unit file exists and
+`not_installed` when it does not, and a unit still `activating` (an
+auto-restart loop) counts as `inactive`. The probe has a 5 second timeout. On
+macOS, a label `launchctl` does not know is `inactive` or `not_installed` by
+whether the plist exists, and any other failure is `unknown`. On Windows, a
+task the English `schtasks` text does not show as running is read from
+Get-ScheduledTask's `State`, which does not depend on the display language: a
+`Disabled` task is `inactive`, an unregistered one `not_installed`, and one
+neither probe can read `unknown`. That probe starts PowerShell, which took
+2.4 s on a Windows 11 box where the task is not installed.
+
+`get_watch_status` publishes `status` beside `installed_active`, and
+`installed_active` now follows it: `true` for `active`, `false` for `inactive`
+or `not_installed`, and `null` when the probe could not tell. Two readings
+change on 1.x. `installed_active` can be `null`, so a reader that requires a
+boolean must handle it. And on macOS a job that is loaded but has no running
+process, which used to read `true`, now reads `false`, because nothing is
+watching. On Windows, `true` still includes a `Ready` task, one enabled and
+waiting for its logon trigger, as it always has.
 
 ## [1.151.1] - 2026-11-16 - OCR no longer misses a late scan in a long PDF
 

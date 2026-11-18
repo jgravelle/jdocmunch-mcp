@@ -427,16 +427,24 @@ def _uninstall_windows() -> dict:
     return {"platform": "schtasks", "task": SERVICE_NAME, "removed": result.returncode == 0}
 
 
-def _watch_task_registered() -> Optional[bool]:
-    """Whether the watch task is registered: True, False, or None when that
-    could not be asked. The answer is a fixed token the script prints, so it
-    does not depend on the display language."""
+# Task Scheduler's `State` enum, which Get-ScheduledTask prints the same in
+# every display language. `Ready` is an enabled task waiting for its logon
+# trigger, which the 1.x `active` has always counted (#206).
+_TASK_ACTIVE_STATES = frozenset({"Running", "Ready", "Queued"})
+_TASK_INACTIVE_STATES = frozenset({"Disabled"})
+
+
+def _scheduled_task_probe() -> Optional[str]:
+    """The watch task's `State` (`Running`, `Ready`, `Disabled`, ...),
+    `absent` when it is not registered, or None when that could not be
+    asked. Both answers are fixed tokens, so neither depends on the display
+    language that `schtasks` text is printed in."""
     # `absent` only for Get-ScheduledTask's own not-found error id, which is
     # invariant across display languages. A missing cmdlet is also category
     # ObjectNotFound, so the category alone is not enough. Any other failure
     # prints `error` and reads as unknown, never as a task that is not there.
     script = (
-        f"try {{ $null = Get-ScheduledTask -TaskName '{SERVICE_NAME}' -ErrorAction Stop; 'present' }}"
+        f"try {{ $t = Get-ScheduledTask -TaskName '{SERVICE_NAME}' -ErrorAction Stop; [string]$t.State }}"
         " catch { if ($_.FullyQualifiedErrorId -like '*_NotFound_*,Get-ScheduledTask') { 'absent' } else { 'error' } }"
     )
     try:
@@ -446,23 +454,21 @@ def _watch_task_registered() -> Optional[bool]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
-        logger.debug("Get-ScheduledTask existence probe failed", exc_info=True)
+        logger.debug("Get-ScheduledTask probe failed", exc_info=True)
         return None
     if result.returncode != 0:
         return None
     word = (result.stdout or b"").decode("ascii", errors="replace").strip()
-    if word == "present":
-        return True
-    if word == "absent":
-        return False
+    if word == "absent" or word in _TASK_ACTIVE_STATES or word in _TASK_INACTIVE_STATES:
+        return word
     return None
 
 
 def _status_windows() -> dict:
-    """`schtasks` prints its state in the system's display language, so an
-    English `Running`/`Ready` is read as active and anything else is
-    `unknown`, never `inactive` (#206). A task that is not registered is
-    `not_installed`, read from a language-independent probe."""
+    """An English `Running`/`Ready` from `schtasks` answers at once. Anything
+    else asks Get-ScheduledTask for the task's `State`, which does not depend
+    on the display language. An answer neither can give is `unknown`, never
+    `inactive` (#206)."""
     try:
         result = subprocess.run(
             ["schtasks", "/Query", "/TN", SERVICE_NAME, "/FO", "LIST"],
@@ -479,14 +485,22 @@ def _status_windows() -> dict:
             "platform": "schtasks", "active": True, "status": "active",
             "state_source": "display_text", "detail": out[:400],
         }
-    if _watch_task_registered() is False:
+    state = _scheduled_task_probe()
+    if state == "absent":
+        return {"platform": "schtasks", "active": False, "status": "not_installed", "detail": out[:400]}
+    if state in _TASK_ACTIVE_STATES:
         return {
-            "platform": "schtasks", "active": False, "status": "not_installed",
-            "detail": out[:400],
+            "platform": "schtasks", "active": True, "status": "active", "state": state,
+            "state_source": "task_state", "detail": out[:400],
+        }
+    if state in _TASK_INACTIVE_STATES:
+        return {
+            "platform": "schtasks", "active": False, "status": "inactive", "state": state,
+            "state_source": "task_state", "detail": out[:400],
         }
     return {
-        "platform": "schtasks", "active": False, "status": "unknown",
-        "state_source": "display_text", "detail": out[:400],
+        "platform": "schtasks", "active": None, "status": "unknown",
+        "probe_error": "probe_failed", "detail": out[:400],
     }
 
 
@@ -525,8 +539,7 @@ def service_status() -> dict:
     """The watch service's state. Every answer carries `status`: `active`,
     `inactive`, `not_installed` or `unknown`, read from what the probe said
     and never from an exit code alone (#206). `active` keeps each platform's
-    existing meaning and is None where the systemd or launchd probe could not
-    ask. A reader that needs the classification reads `status`."""
+    existing meaning and is None wherever the probe could not ask. A reader that needs the classification reads `status`."""
     sys_ = platform.system()
     if sys_ == "Linux":
         out = _status_systemd()
