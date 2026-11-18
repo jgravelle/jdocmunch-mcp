@@ -12,30 +12,30 @@ nonzero exit. The probe compared the output with `active`, so a probe that
 observed nothing published `active: false` and `installed_active: false`, and
 an operator read a running watcher as stopped. Reported by @dkiaulakis.
 
-Every service answer now carries `status`: `active`, `inactive`,
+Every service answer now carries a new `status` key: `active`, `inactive`,
 `not_installed` or `unknown`, read from what the probe printed and never from
-an exit code alone. When the probe could not ask, `active` is `null`, with a
-stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout` and
-`probe_failed` on Linux and macOS; `probe_failed` on Windows) and the diagnostic kept in `detail`. On systemd, a successful
-query for an inactive unit is `inactive` when the unit file exists and
-`not_installed` when it does not, and a unit still `activating` (an
-auto-restart loop) counts as `inactive`. The probe has a 5 second timeout. On
-macOS, a label `launchctl` does not know is `inactive` or `not_installed` by
-whether the plist exists, and any other failure is `unknown`. On Windows, a
-task the English `schtasks` text does not show as running is read from
-Get-ScheduledTask's `State`, which does not depend on the display language: a
-`Disabled` task is `inactive`, an unregistered one `not_installed`, and one
-neither probe can read `unknown`. That probe starts PowerShell, which took
-about 2.3 s on a Windows 11 box where the task is not installed.
+an exit code alone. When the probe could not ask, `status` is `unknown`, with
+a stable `probe_error` (`no_user_bus`, `permission_denied`, `timeout` and
+`probe_failed` on Linux and macOS; `probe_failed` on Windows) and the
+diagnostic kept in `detail`. On systemd, a successful query for an inactive
+unit is `inactive` when the unit file exists and `not_installed` when it does
+not, and a unit still `activating` (an auto-restart loop) counts as
+`inactive`. The probe has a 5 second timeout. On macOS, a label `launchctl`
+does not know is `inactive` or `not_installed` by whether the plist exists, a
+loaded job with no running process is `inactive`, and any other failure is
+`unknown`. On Windows, a task the English `schtasks` text does not show as
+running is read from Get-ScheduledTask's `State`, which does not depend on the
+display language: a `Disabled` task is `inactive`, an unregistered one
+`not_installed`, and one neither probe can read `unknown`. That probe starts
+PowerShell, which took about 2.3 s on a Windows 11 box where the task is not
+installed.
 
-`get_watch_status` publishes `status` beside `installed_active`, and
-`installed_active` now follows it: `true` for `active`, `false` for `inactive`
-or `not_installed`, and `null` when the probe could not tell. Two readings
-change on 1.x. `installed_active` can be `null`, so a reader that requires a
-boolean must handle it. And on macOS a job that is loaded but has no running
-process, which used to read `true`, now reads `false`, because nothing is
-watching. On Windows, `true` still includes a `Ready` task, one enabled and
-waiting for its logon trigger, as it always has.
+`get_watch_status` publishes `status` beside `installed_active`. The change is
+additive: `installed_active` and every nested `active` keep their 1.x boolean
+meaning, so a consumer that reads them sees exactly what it saw before. That
+includes reading `false` when the state is unknown, so `installed_active` on
+its own still cannot tell a stopped watcher from one the probe could not see.
+Read `status` for that.
 
 ## [1.151.1] - 2026-11-16 - OCR no longer misses a late scan in a long PDF
 

@@ -12,6 +12,10 @@ The cases are the reporter's: a successful active query, a successful inactive
 or missing-unit query, a missing user bus, a permission or transport failure,
 and a timeout. The state is read from what the probe printed, never from its
 exit code alone.
+
+Ruling B (the owner, 2026-11-18): the fix is additive. `active` and
+`installed_active` keep their 1.x boolean meaning, so they read False for an
+unknown state, and the new `status` and `probe_error` keys carry the answer.
 """
 
 from __future__ import annotations
@@ -60,6 +64,14 @@ def test_a_successful_active_query_is_active(systemd):
     assert s["active"] is True and s["status"] == "active", s
 
 
+def test_a_reloading_unit_is_active_and_keeps_the_1x_flag(systemd):
+    unit, answer = systemd
+    unit.write_text("[Unit]\n")
+    answer.update(out="reloading\n", rc=0)
+    s = si._status_systemd()
+    assert s["status"] == "active" and s["active"] is False, s
+
+
 def test_a_successful_inactive_query_is_inactive(systemd):
     unit, answer = systemd
     unit.write_text("[Unit]\n")
@@ -97,7 +109,7 @@ def test_a_missing_user_bus_is_unknown_and_keeps_the_diagnostic(systemd):
     unit.write_text("[Unit]\n")
     answer.update(out="", err=NO_BUS + "\n", rc=1)
     s = si._status_systemd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
     assert s["probe_error"] == "no_user_bus", s
     assert s["detail"] == NO_BUS, s
 
@@ -107,7 +119,7 @@ def test_a_permission_failure_is_unknown(systemd):
     unit.write_text("[Unit]\n")
     answer.update(out="", err="Failed to connect to bus: Permission denied\n", rc=1)
     s = si._status_systemd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
     assert s["probe_error"] == "permission_denied", s
 
 
@@ -116,7 +128,7 @@ def test_a_transport_failure_is_unknown(systemd):
     unit.write_text("[Unit]\n")
     answer.update(out="", err="Transport endpoint is not connected\n", rc=1)
     s = si._status_systemd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
     assert s["probe_error"] == "probe_failed", s
 
 
@@ -133,7 +145,7 @@ def test_a_probe_timeout_is_unknown(systemd):
     unit.write_text("[Unit]\n")
     answer["raise"] = subprocess.TimeoutExpired(["systemctl"], 5)
     s = si._status_systemd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
     assert s["probe_error"] == "timeout", s
     assert answer["kw"]["timeout"] == si._PROBE_TIMEOUT_SECONDS
 
@@ -144,7 +156,7 @@ def test_a_nonzero_exit_alone_is_not_inactive(systemd):
     unit.write_text("[Unit]\n")
     answer.update(out="", err="", rc=1)
     s = si._status_systemd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
 
 
 def test_no_systemctl_means_no_systemd_service(monkeypatch, tmp_path):
@@ -201,7 +213,7 @@ def test_launchd_another_failure_is_unknown_not_inactive(launchd):
     plist.write_text("<plist/>")
     answer.update(rc=1, err="Bootstrap failed: 5: Input/output error")
     s = si._status_launchd()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
     assert s["probe_error"] == "probe_failed", s
 
 
@@ -210,7 +222,7 @@ def test_launchd_a_permission_failure_is_unknown(launchd):
     plist.write_text("<plist/>")
     answer.update(rc=1, err="Permission denied")
     s = si._status_launchd()
-    assert s["active"] is None and s["probe_error"] == "permission_denied", s
+    assert s["active"] is False and s["probe_error"] == "permission_denied", s
 
 
 @pytest.mark.parametrize(
@@ -224,7 +236,7 @@ def test_launchd_a_probe_that_could_not_run_is_unknown(monkeypatch, exc, probe_e
 
     monkeypatch.setattr(si.subprocess, "run", run)
     s = si._status_launchd()
-    assert s["active"] is None and s["status"] == "unknown" and s["probe_error"] == probe_error, s
+    assert s["active"] is False and s["status"] == "unknown" and s["probe_error"] == probe_error, s
 
 
 def _windows(monkeypatch, rc, out, state, calls=None):
@@ -250,15 +262,18 @@ def test_windows_an_english_running_task_is_active_without_powershell(monkeypatc
 
 
 def test_windows_english_text_on_a_failed_query_is_not_trusted(monkeypatch):
+    """`status` needs a successful query; `active` keeps its 1.x text match."""
     _windows(monkeypatch, 1, "Running", None)
     s = si._status_windows()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["status"] == "unknown" and s["active"] is True, s
 
 
 @pytest.mark.parametrize(
     "state,active,status",
     [
-        ("Running", True, "active"), ("Ready", True, "active"), ("Queued", True, "active"),
+        # `active` keeps its 1.x meaning, the English text match, so German
+        # text reads False; `status` is the answer.
+        ("Running", False, "active"), ("Ready", False, "active"), ("Queued", False, "active"),
         ("Disabled", False, "inactive"),
     ],
 )
@@ -278,7 +293,7 @@ def test_windows_a_task_that_is_not_registered_is_not_installed(monkeypatch):
 def test_windows_a_task_that_could_not_be_read_is_unknown_not_inactive(monkeypatch):
     _windows(monkeypatch, 0, "Aufgabenname: \\jdocmunch-watch\nStatus: Bereit\n", None)
     s = si._status_windows()
-    assert s["active"] is None and s["status"] == "unknown", s
+    assert s["active"] is False and s["status"] == "unknown", s
 
 
 @pytest.mark.parametrize(
@@ -318,12 +333,12 @@ def test_a_probe_with_no_classification_is_unknown(monkeypatch):
         ({"platform": "systemd", "active": True, "status": "active"}, True),
         ({"platform": "systemd", "active": False, "status": "inactive"}, False),
         ({"platform": "systemd", "active": False, "status": "not_installed"}, False),
-        ({"platform": "systemd", "active": None, "status": "unknown", "probe_error": "no_user_bus"}, None),
-        # launchd: loaded but not running is not an active watcher.
-        ({"platform": "launchd", "active": True, "status": "inactive"}, False),
+        ({"platform": "systemd", "active": False, "status": "unknown", "probe_error": "no_user_bus"}, False),
+        # launchd: loaded but not running keeps its 1.x `true`; `status` says inactive.
+        ({"platform": "launchd", "active": True, "status": "inactive"}, True),
     ],
 )
-def test_get_watch_status_does_not_collapse_unknown_into_inactive(
+def test_get_watch_status_adds_status_and_keeps_installed_active(
     monkeypatch, tmp_path, service, installed_active
 ):
     monkeypatch.setattr(si, "service_status", lambda: dict(service))
@@ -343,6 +358,6 @@ def test_get_watch_status_reports_a_raising_probe_as_unknown(monkeypatch, tmp_pa
     from jdocmunch_mcp.tools.get_watch_status import get_watch_status
 
     out = get_watch_status(storage_path=str(tmp_path / "empty"))["service"]
-    assert out["installed_active"] is None and out["status"] == "unknown", out
+    assert out["installed_active"] is False and out["status"] == "unknown", out
     assert out["detail"]["probe_error"] == "probe_failed", out
     assert "probe exploded" in out["detail"]["detail"], out

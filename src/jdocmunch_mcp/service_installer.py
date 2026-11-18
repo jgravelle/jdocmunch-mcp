@@ -236,7 +236,8 @@ def _status_systemd() -> dict:
     """The watch service's state on systemd: `active`, `inactive`,
     `not_installed` or `unknown`.
 
-    `active` is None when the probe could not ask. A process started without
+    `active` keeps its 1.x meaning (`is-active` printed `active`), so it is
+    False when the probe could not ask; `status` says why. A process started without
     the user's session bus (`DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`) gets
     a bus error and a nonzero exit, and reading that as inactive told the user
     a running watcher was stopped (#206). The state is read from what
@@ -256,20 +257,20 @@ def _status_systemd() -> dict:
         )
     except subprocess.TimeoutExpired:
         return {
-            "platform": "systemd", "active": None, "status": "unknown",
+            "platform": "systemd", "active": False, "status": "unknown",
             "probe_error": "timeout",
             "detail": f"systemctl --user is-active did not answer in {_PROBE_TIMEOUT_SECONDS:g} s",
         }
     except OSError as exc:
         return {
-            "platform": "systemd", "active": None, "status": "unknown",
+            "platform": "systemd", "active": False, "status": "unknown",
             "probe_error": "probe_failed", "detail": str(exc),
         }
     out = (result.stdout or "").strip()
     err = (result.stderr or "").strip()
     state = out.splitlines()[0].strip() if out else ""
     if state in _SYSTEMD_ACTIVE_STATES:
-        return {"platform": "systemd", "active": True, "status": "active", "state": state}
+        return {"platform": "systemd", "active": state == "active", "status": "active", "state": state}
     if state in _SYSTEMD_INACTIVE_STATES:
         installed = _systemd_unit_path().exists()
         return {
@@ -278,7 +279,7 @@ def _status_systemd() -> dict:
             "state": state,
         }
     return {
-        "platform": "systemd", "active": None, "status": "unknown",
+        "platform": "systemd", "active": False, "status": "unknown",
         "probe_error": _systemd_probe_error(err),
         "state": out or err,
         "detail": err or out or f"systemctl --user is-active exited {result.returncode} with no output",
@@ -363,13 +364,13 @@ def _status_launchd() -> dict:
         )
     except subprocess.TimeoutExpired:
         return {
-            "platform": "launchd", "active": None, "status": "unknown",
+            "platform": "launchd", "active": False, "status": "unknown",
             "probe_error": "timeout",
             "detail": f"launchctl list did not answer in {_PROBE_TIMEOUT_SECONDS:g} s",
         }
     except OSError as exc:
         return {
-            "platform": "launchd", "active": None, "status": "unknown",
+            "platform": "launchd", "active": False, "status": "unknown",
             "probe_error": "probe_failed", "detail": str(exc),
         }
     out = (result.stdout or "").strip()
@@ -389,7 +390,7 @@ def _status_launchd() -> dict:
             "detail": err or out,
         }
     return {
-        "platform": "launchd", "active": None, "status": "unknown",
+        "platform": "launchd", "active": False, "status": "unknown",
         "probe_error": "permission_denied" if "permission" in err.lower() else "probe_failed",
         "detail": err or out or f"launchctl list exited {result.returncode} with no output",
     }
@@ -468,7 +469,8 @@ def _status_windows() -> dict:
     """An English `Running`/`Ready` from `schtasks` answers at once. Anything
     else asks Get-ScheduledTask for the task's `State`, which does not depend
     on the display language. An answer neither can give is `unknown`, never
-    `inactive` (#206)."""
+    `inactive` (#206). `active` keeps its 1.x meaning, the English text
+    match, on every branch."""
     try:
         result = subprocess.run(
             ["schtasks", "/Query", "/TN", SERVICE_NAME, "/FO", "LIST"],
@@ -480,26 +482,28 @@ def _status_windows() -> dict:
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("schtasks query failed", exc_info=True)
         out, rc = str(exc), None
-    if rc == 0 and ("Running" in out or "Ready" in out):
+    # The 1.x `active`, unchanged: an English `Running`/`Ready` in the text.
+    legacy_active = "Running" in out or "Ready" in out
+    if rc == 0 and legacy_active:
         return {
             "platform": "schtasks", "active": True, "status": "active",
             "state_source": "display_text", "detail": out[:400],
         }
     state = _scheduled_task_probe()
     if state == "absent":
-        return {"platform": "schtasks", "active": False, "status": "not_installed", "detail": out[:400]}
+        return {"platform": "schtasks", "active": legacy_active, "status": "not_installed", "detail": out[:400]}
     if state in _TASK_ACTIVE_STATES:
         return {
-            "platform": "schtasks", "active": True, "status": "active", "state": state,
+            "platform": "schtasks", "active": legacy_active, "status": "active", "state": state,
             "state_source": "task_state", "detail": out[:400],
         }
     if state in _TASK_INACTIVE_STATES:
         return {
-            "platform": "schtasks", "active": False, "status": "inactive", "state": state,
+            "platform": "schtasks", "active": legacy_active, "status": "inactive", "state": state,
             "state_source": "task_state", "detail": out[:400],
         }
     return {
-        "platform": "schtasks", "active": None, "status": "unknown",
+        "platform": "schtasks", "active": legacy_active, "status": "unknown",
         "probe_error": "probe_failed", "detail": out[:400],
     }
 
@@ -539,7 +543,8 @@ def service_status() -> dict:
     """The watch service's state. Every answer carries `status`: `active`,
     `inactive`, `not_installed` or `unknown`, read from what the probe said
     and never from an exit code alone (#206). `active` keeps each platform's
-    existing meaning and is None wherever the probe could not ask. A reader that needs the classification reads `status`."""
+    1.x meaning and stays a boolean, so it reads False for an unknown state;
+    a reader that needs the classification reads `status`."""
     sys_ = platform.system()
     if sys_ == "Linux":
         out = _status_systemd()
