@@ -158,7 +158,7 @@ def _initialization_options():
     """`create_initialization_options()` carrying our `instructions` string."""
     opts = server.create_initialization_options()
     if "instructions" not in type(opts).model_fields:
-        # mcp SDK predates the field (we allow >=1.10.0). Nothing to say, and
+        # mcp SDK predates the field (a guard: the floor is >=1.30.0). Nothing to say, and
         # nowhere to say it.
         # `logging.getLogger(__name__)`, NOT a module-level `logger`: this module
         # has none, and this line only runs on an SDK old enough to lack the
