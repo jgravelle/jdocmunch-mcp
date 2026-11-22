@@ -408,9 +408,9 @@ Path traversal prevention, symlink escape protection, secret exclusion, file-siz
 
 Released under the **jDocMunch-MCP Dual-Use License** ([full terms](LICENSE)). **Free for non-commercial use. Commercial use requires a paid license**, one-time, sold by jMunch LLC.
 
-**jDocMunch only:** [Builder, $29](https://jcodemunch.com/descriptions.php#builder) (1 developer) · [Studio, $99](https://jcodemunch.com/descriptions.php#studio) (up to 5) · [Platform, $499](https://jcodemunch.com/descriptions.php#platform) (org-wide internal deployment)
+[Builder $99](https://jcodemunch.com/descriptions.php#builder) (1 developer) · [Studio $449](https://jcodemunch.com/descriptions.php#studio) (up to 5 developers) · [Platform $2,499](https://jcodemunch.com/descriptions.php#platform) (org-wide internal deployment), one-time, all three tools (jCodeMunch, jDocMunch and jDataMunch).
 
-**Full jMunch suite (code + docs + data):** [Trio Builder, $99](https://jcodemunch.com/descriptions.php#builder) · [Trio Studio, $449](https://jcodemunch.com/descriptions.php#studio) · [Trio Platform, $2,499](https://jcodemunch.com/descriptions.php#platform)
+**Freelancing or running a side project?** The Freelance license is $9.99 one-time, for your own freelance work and side projects that brought in under $10,000 in the last 12 months. Your employer's work needs Builder. What you paid counts toward Builder.
 
 Personal and other non-commercial use is free. Work use at a for-profit company, or for client or paid work, needs a license, paid once.
 

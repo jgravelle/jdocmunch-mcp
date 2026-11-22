@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed - every paid license now covers all three jMunch tools
+
+Commercial licenses for jDocMunch-MCP are now sold only as suite licenses,
+each covering jCodeMunch, jDocMunch and jDataMunch: Builder $99 (1
+developer), Studio $449 (up to 5 developers) and Platform $2,499 (org-wide
+internal deployment), one-time. The jDocMunch-only Builder, Studio and
+Platform licenses are no longer sold. Every license already sold stays valid
+on its original terms.
+
+A new Freelance license, $9.99 one-time, covers one individual's own
+freelance work and side projects with income under $10,000 in the preceding
+12 months. It does not cover work for an employer. The amount paid counts
+toward a Builder license. `LICENSE` carries the Freelance terms between the
+non-commercial and commercial sections, the new price list, and the purchase
+link `https://jcodemunch.com/descriptions.php`. The license identifier
+`LicenseRef-jDocMunch-Dual-Use` is unchanged. The README licensing section
+lists the same prices.
+
 ## [1.151.3] - 2026-11-21 - the mcp SDK floor rises to 1.30.0
 
 ### Security - the mcp SDK floor rises to 1.30.0 (#209)
