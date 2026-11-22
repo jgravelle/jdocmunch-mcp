@@ -103,6 +103,20 @@ SECRET_PATTERNS = [
     "credentials.json",
     "service-account*.json",
     "*.secrets",
+    # Common plaintext-credential files the original list missed. These have
+    # unambiguous basenames, so a basename match is safe (no false positives
+    # on legitimate docs). Directory-identified secrets with GENERIC basenames
+    # (.aws/credentials, .kube/config, .docker/config.json) are handled by
+    # SECRET_PATH_SUFFIXES below instead, to avoid blocklisting "config".
+    ".git-credentials",   # git stores HTTP credentials here in cleartext
+    "*.tfstate",          # Terraform state routinely embeds secrets
+    "*.tfstate.backup",
+    ".dockercfg",         # legacy Docker registry auth token
+    ".pgpass",            # PostgreSQL password file
+    ".my.cnf",            # MySQL client password
+    ".boto",              # AWS/GCP boto credentials
+    "kubeconfig",         # Kubernetes cluster credentials under a plain name
+    "*.kubeconfig",
 ]
 
 
@@ -114,11 +128,30 @@ SECRET_PATTERNS = [
 _SECRET_RE = re.compile("|".join(fnmatch.translate(p) for p in SECRET_PATTERNS))
 
 
+# Secret files whose BASENAME is too generic to blocklist on its own
+# (``credentials``, ``config``, ``config.json``, ``hosts.yml``): a doc may
+# legitimately use those names, so they are identified by the credential
+# DIRECTORY they live in instead, matched against the separator-normalised
+# path. Keeping these out of SECRET_PATTERNS preserves that list's "no pattern
+# names a separator" invariant (see the note above _SECRET_RE).
+SECRET_PATH_SUFFIXES = (
+    ".aws/credentials",
+    ".kube/config",
+    ".docker/config.json",
+    ".config/gh/hosts.yml",
+    ".config/gcloud/application_default_credentials.json",
+)
+
+
 def is_secret_file(file_path: str) -> bool:
     """Check if a file path matches known secret file patterns."""
     name = os.path.basename(file_path).lower()
     path_lower = file_path.lower()
-    return bool(_SECRET_RE.match(name) or _SECRET_RE.match(path_lower))
+    if _SECRET_RE.match(name) or _SECRET_RE.match(path_lower):
+        return True
+    # Directory-identified credentials whose basename is too generic to list.
+    norm = path_lower.replace("\\", "/")
+    return any(norm == s or norm.endswith("/" + s) for s in SECRET_PATH_SUFFIXES)
 
 
 # --- Binary File Detection ---

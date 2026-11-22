@@ -41,6 +41,37 @@ class TestIsSecretFile:
     def test_credentials_json(self):
         assert is_secret_file("credentials.json") is True
 
+    # Common credential files that the original list missed (regression guard).
+    def test_git_credentials(self):
+        assert is_secret_file(".git-credentials") is True
+
+    def test_terraform_state(self):
+        assert is_secret_file("terraform.tfstate") is True
+
+    def test_kubeconfig_plain_name(self):
+        assert is_secret_file("kubeconfig") is True
+
+    # Directory-identified credentials whose basename is too generic to list.
+    def test_aws_credentials_by_path(self):
+        assert is_secret_file("/home/u/.aws/credentials") is True
+
+    def test_kube_config_by_path(self):
+        assert is_secret_file("/home/u/.kube/config") is True
+
+    def test_docker_config_by_path(self):
+        assert is_secret_file("project/.docker/config.json") is True
+
+    def test_docker_config_windows_sep(self):
+        assert is_secret_file(r"C:\Users\u\.docker\config.json") is True
+
+    # A plain config.json NOT under a credential directory stays indexable:
+    # the directory-aware rule must not blocklist generic doc filenames.
+    def test_generic_config_json_not_secret(self):
+        assert is_secret_file("src/config.json") is False
+
+    def test_generic_config_not_secret(self):
+        assert is_secret_file("docs/config") is False
+
 
 class TestIsBinaryExtension:
     def test_png(self):
