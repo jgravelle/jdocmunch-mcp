@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.151.3] - 2026-11-21 - the mcp SDK floor rises to 1.30.0
+
+### Security - the mcp SDK floor rises to 1.30.0 (#209)
+
+The `mcp` dependency was declared `>=1.10.0,<2.0.0`, so an install could
+resolve to an SDK release with known advisories (one high, four medium).
+1.30.0 is the first `mcp` release with those advisories fixed, and the floor
+is now `>=1.30.0,<2.0.0`. The upper bound is unchanged. An environment that
+already has `mcp` 1.30.0 or newer sees no change; an older one is upgraded on
+the next install of this package. No tool, response key or behavior changes.
+
 ## [1.151.2] - 2026-11-18 - a watch-service probe that could not ask reads as unknown, not as stopped
 
 ### Fixed - a watch-service probe that could not ask reads as unknown, not as stopped (#206)
