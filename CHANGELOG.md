@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [1.151.4] - 2026-11-23 - more credential files stay out of the index
+
+### Fixed - more credential files stay out of the index (#211)
+
+`is_secret_file` decides which files indexing skips as secrets. Its list
+missed several common plaintext-credential files, so a folder holding one of
+them could have that file's contents indexed into the doc store and returned
+by search. The list now also matches, by file name, `.git-credentials`,
+`*.tfstate` and `*.tfstate.backup`, `.dockercfg`, `.pgpass`, `.my.cnf`,
+`.boto`, `kubeconfig` and `*.kubeconfig`. Files whose names are too generic
+to skip everywhere (`credentials`, `config`, `config.json`, `hosts.yml`) are
+skipped only inside their credential directory: `.aws/credentials`,
+`.kube/config`, `.docker/config.json`, `.config/gh/hosts.yml` and
+`.config/gcloud/application_default_credentials.json`. A document that
+merely uses one of those generic names elsewhere is still indexed.
+Reported and fixed by @0x5t4l1n (#211, #212).
+
 ## [1.151.3] - 2026-11-21 - the mcp SDK floor rises to 1.30.0
 
 ### Security - the mcp SDK floor rises to 1.30.0 (#209)
