@@ -1,6 +1,6 @@
 # jdocmunch-mcp
 
-**Version:** 1.151.4 |
+**Version:** 1.151.5 |
 **Tests:** `PYTHONPATH=src python -m pytest tests/ -q`
 
 ⚠ **`python -m pytest`, not bare `pytest`**, matching the rest of

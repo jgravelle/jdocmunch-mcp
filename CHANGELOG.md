@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.151.5] - 2026-11-23 - every paid license now covers all three jMunch tools
+
 ### Changed - every paid license now covers all three jMunch tools
 
 Commercial licenses for jDocMunch-MCP are now sold only as suite licenses,
