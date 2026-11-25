@@ -1,6 +1,6 @@
 {
   "name": "self_v1_11_0",
-  "description": "Self-fixture: queries against jdocmunch-mcp's own documentation. Originally locked at v1.11.0 under the legacy scorer; re-baselined at v1.12.0 against the BM25 default engine. Every future release must hit >= 0.98 nDCG/MRR/Recall under the default engine. extra_ignore_patterns excludes benchmarks/replay/ (fixtures/results quote every query verbatim) + benchmarks/wiki/ (JSON results) + todo.md (PRD reproduces every query in section titles) + CLAUDE.md and docs/CLAUDE-history.md (the rolling per-release changelog brief and the archive it is trimmed into; its tool-keyword-dense entries shadow stable CHANGELOG goldens, e.g. 'broken links' demoted by the #47-50 release notes at v1.77.0). The archive inherits this exclusion by necessity: it IS the trimmed CLAUDE.md entries, so tracking it under docs/ would otherwise move that shadowing content out from under the CLAUDE.md pattern and re-break the same three CHANGELOG goldens. Single-answer goldens — multi-answer goldens distort ideal-DCG.",
+  "description": "Self-fixture: queries against jdocmunch-mcp's own documentation. Originally locked at v1.11.0 under the legacy scorer; re-baselined at v1.12.0 against the BM25 default engine. Every future release must hit >= 0.98 nDCG/MRR/Recall under the default engine. extra_ignore_patterns excludes benchmarks/replay/ (fixtures/results quote every query verbatim) + benchmarks/wiki/ (JSON results) + todo.md (PRD reproduces every query in section titles) + CLAUDE.md and docs/CLAUDE-history.md (the rolling per-release changelog brief and the archive it is trimmed into; its tool-keyword-dense entries shadow stable CHANGELOG goldens, e.g. 'broken links' demoted by the #47-50 release notes at v1.77.0). The archive inherits this exclusion by necessity: it IS the trimmed CLAUDE.md entries, so tracking it under docs/ would otherwise move that shadowing content out from under the CLAUDE.md pattern and re-break the same three CHANGELOG goldens. 'stale pages' was re-pinned at v1.151.6 from the wiki benchmark's Index Snapshot table (a v1.12.0 BM25 output that never says 'stale' and matched only 'pages') to README 'What you can do', the only tracked, non-excluded section that names get_stale_pages; the README landing-page rewrite (bbf67f2, v1.123.1) made it rank first. Single-answer goldens — multi-answer goldens distort ideal-DCG.",
   "repo_path": ".",
   "repo_id": "jdocmunch-mcp",
   "extra_ignore_patterns": [
@@ -71,7 +71,7 @@
     {
       "query": "stale pages",
       "expected_top_k": [
-        "local/jdocmunch-mcp::benchmarks/jDocMunch_Benchmark_Wiki.md::jdocmunch-mcp-wiki-benchmark/index-snapshot#2"
+        "local/jdocmunch-mcp::README.md::jdocmunch-mcp/what-you-can-do#2"
       ],
       "k": 5
     },

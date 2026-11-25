@@ -239,3 +239,42 @@ class TestBaselineLock:
         assert agg["ndcg"] >= 0.95, agg
         assert agg["mrr"] >= 0.95, agg
         assert agg["recall"] >= 0.95, agg
+
+
+# ---------------------------------------------------------------------------
+# The "stale pages" golden names the section that documents stale pages
+# ---------------------------------------------------------------------------
+
+STALE_PAGES_GOLDEN = "local/jdocmunch-mcp::README.md::jdocmunch-mcp/what-you-can-do#2"
+
+
+class TestStalePagesGolden:
+    """The self fixture's "stale pages" golden is README "What you can do".
+
+    It was the wiki benchmark's Index Snapshot table, a v1.12.0 BM25 output
+    that never says "stale" and matched only "pages". README "What you can
+    do" is the one tracked, non-excluded section that names get_stale_pages,
+    and it has ranked first since the README rewrite in v1.123.1.
+    """
+
+    def _query(self):
+        path = ROOT / "benchmarks" / "replay" / "fixtures" / "self_v1_11_0.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return next(q for q in data["queries"] if q["query"] == "stale pages")
+
+    def test_golden_is_readme_what_you_can_do(self):
+        assert self._query()["expected_top_k"] == [STALE_PAGES_GOLDEN]
+
+    def test_golden_section_documents_stale_pages(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        start = readme.index("\n## What you can do\n")
+        end = readme.index("\n## ", start + 1)
+        assert "get_stale_pages" in readme[start:end]
+
+    def test_golden_ranks_first(self):
+        from benchmarks.replay.run_replay import run_fixture
+
+        report = run_fixture("self_v1_11_0", baseline=None, gate=0.02, write_results=False)
+        row = next(r for r in report["per_query"] if r["query"] == "stale pages")
+        assert row["predicted"][:1] == [STALE_PAGES_GOLDEN], row
+        assert row["mrr"] == 1.0, row
