@@ -1416,8 +1416,21 @@ def discover_doc_files(
     skip_counts: Optional[dict] = None,
     include_dot_dirs: Optional[list] = None,
     skip_paths: Optional[dict] = None,
+    secret_rel_prefix: str = "",
+    count_ceiling: Optional[int] = None,
 ) -> tuple:
     """Discover doc files (.md, .txt, .rst) with security filtering.
+
+    ``secret_rel_prefix`` (jdoc#216): POSIX path of ``folder_path`` relative to
+    the index root, for a sub-walk over a directory listed in ``paths``. The
+    secret check and its warning see ``<prefix>/<rel>``, the path the full walk
+    would see, so a directory-scoped pattern such as ``.docker/config.json``
+    still matches when the caller lists ``.docker``. Empty = this is the root.
+
+    ``count_ceiling`` (jdoc#217): overrides the discovery safety ceiling
+    (default ``max_files * _DISCOVERY_HARD_CEILING_MULT``). A sub-walk whose
+    share of the cap is small, or zero, still counts its files against the
+    whole call's ceiling, so the caller can report truncation.
 
     ``include_dot_dirs`` (jdoc#113): directory NAMES to index despite starting
     with a dot, unioned with ``DOT_DIR_ALLOWLIST`` (``.github``). Dotted
@@ -1453,7 +1466,10 @@ def discover_doc_files(
         max_size = resolve_max_file_size()
     discovered_items: list = []  # [(file_path, mtime_or_zero), ...]
     warnings = []
-    hard_ceiling = max_files * _DISCOVERY_HARD_CEILING_MULT
+    hard_ceiling = (
+        max_files * _DISCOVERY_HARD_CEILING_MULT
+        if count_ceiling is None else count_ceiling
+    )
     root = folder_path.resolve()
 
     gitignore_spec = _load_gitignore(root)
@@ -1540,8 +1556,11 @@ def discover_doc_files(
                 _count_skip(skip_counts, "extra_ignore_pattern")
                 continue
 
-            if is_secret_file(rel_path):
-                warnings.append(f"Skipped secret file: {rel_path}")
+            secret_rel = (
+                f"{secret_rel_prefix}/{rel_path}" if secret_rel_prefix else rel_path
+            )
+            if is_secret_file(secret_rel):
+                warnings.append(f"Skipped secret file: {secret_rel}")
                 _count_skip(skip_counts, "secret_file")
                 continue
 
@@ -1603,21 +1622,34 @@ def _resolve_explicit_paths(
       * a directory (recursed via ``discover_doc_files`` against that subtree),
       * a file (validated and added when its extension is known).
 
-    Returns ``(files, warnings, requested, mtimes_by_path)``. ``requested`` is
+    Returns ``(files, warnings, requested, mtimes_by_path, discovered)``.
+    ``discovered`` (jdoc#217) is how many indexable files the listed entries
+    hold, INCLUDING those past ``max_files``, so the caller can report
+    truncation the way the folder walk does. Every entry is still visited
+    after the cap fills; past it, entries are only counted. The count shares
+    the walk's safety ceiling (``max_files * _DISCOVERY_HARD_CEILING_MULT``).
+    ``requested`` is
     the list of root-relative POSIX paths for every entry that resolved
     inside ``folder_path`` — including entries that no longer exist on disk —
     so the caller can scope an incremental diff to exactly what was asked for
     (jdoc#31). ``mtimes_by_path`` maps each returned ``Path`` to its POSIX
     mtime float. Mirrors ``discover_doc_files`` semantics for security:
     rejects symlink escapes, path-traversal attempts, and entries outside
-    ``folder_path``. Skips entries with unknown extensions silently (caller
-    gets a `warnings` entry per skip).
+    ``folder_path``, and runs the secret check on the ROOT-relative path
+    (jdoc#216): a listed file, and every file under a listed directory, is
+    refused exactly when the walk would refuse it, with the walk's warning.
+    Skips entries with unknown extensions silently (caller gets a `warnings`
+    entry per skip).
     """
     files: list = []
     warnings: list = []
     requested: list = []
     seen: set = set()
     abs_mtimes: dict = {}
+    hard_ceiling = max_files * _DISCOVERY_HARD_CEILING_MULT
+    # Distinct indexable files the listed entries hold beyond what `files`
+    # keeps (jdoc#217).
+    overflow = 0
 
     for raw in paths:
         if not isinstance(raw, str) or not raw.strip():
@@ -1633,10 +1665,11 @@ def _resolve_explicit_paths(
             continue
 
         try:
-            requested.append(p.relative_to(folder_path).as_posix())
+            rel = p.relative_to(folder_path).as_posix()
         except ValueError:
             warnings.append(f"Skipped path outside folder: {raw!r}")
             continue
+        requested.append(rel)
 
         if not p.exists():
             warnings.append(f"Skipped non-existent path: {raw!r}")
@@ -1646,21 +1679,37 @@ def _resolve_explicit_paths(
             # ⚠ `p` is this sub-walk's ROOT, so naming a dotted directory in
             # `paths` still indexes it (an explicit request is not a stray
             # cache). Only dotted directories BELOW it are pruned.
+            # jdoc#217: the sub-walk returns EVERY file it finds (up to the
+            # call's ceiling) so files past the cap are counted, and counted
+            # once when entries overlap. The kept subset is chosen as before:
+            # when this entry holds more than the cap has room for, the newest
+            # files win, exactly as the sub-walk's own truncation picked them.
+            room = max(max_files - len(files), 0)
+            ceiling_left = max(hard_ceiling - len(files) - overflow, 0)
             sub_files, sub_warnings, _sub_discovered, sub_mtimes = discover_doc_files(
                 p,
-                max_files=max_files - len(files),
+                max_files=ceiling_left,
                 follow_symlinks=follow_symlinks,
                 include_dot_dirs=include_dot_dirs,
+                secret_rel_prefix="" if rel == "." else rel,
+                count_ceiling=ceiling_left,
             )
             warnings.extend(sub_warnings)
-            abs_mtimes.update(sub_mtimes)
-            for f in sub_files:
+            if len(sub_files) > room:
+                sub_files = sorted(
+                    sub_files, key=lambda f: sub_mtimes.get(f, 0.0), reverse=True,
+                )
+            for i, f in enumerate(sub_files):
                 fr = f.resolve()
-                if fr not in seen:
-                    seen.add(fr)
+                if fr in seen:
+                    continue
+                seen.add(fr)
+                if i < room and len(files) < max_files:
                     files.append(f)
-                    if len(files) >= max_files:
-                        break
+                    if f in sub_mtimes:
+                        abs_mtimes[f] = sub_mtimes[f]
+                else:
+                    overflow += 1
         elif p.is_file():
             if not follow_symlinks and p.is_symlink():
                 warnings.append(f"Skipped symlink (follow_symlinks=False): {raw!r}")
@@ -1682,21 +1731,30 @@ def _resolve_explicit_paths(
             elif ext not in ALL_EXTENSIONS:
                 warnings.append(f"Skipped unsupported extension: {raw!r}")
                 continue
+            # jdoc#216: the walk's secret check, on the root-relative path and
+            # with the walk's warning. An explicit path bypasses .gitignore by
+            # design; it never bypasses this.
+            if is_secret_file(rel):
+                warnings.append(f"Skipped secret file: {rel}")
+                continue
             pr = p.resolve()
             if pr not in seen:
                 seen.add(pr)
-                files.append(p)
-                try:
-                    abs_mtimes[p.resolve()] = p.stat().st_mtime
-                except OSError:
-                    pass
+                if len(files) < max_files:
+                    files.append(p)
+                    try:
+                        abs_mtimes[p.resolve()] = p.stat().st_mtime
+                    except OSError:
+                        pass
+                else:
+                    overflow += 1
         else:
             warnings.append(f"Skipped non-file/non-dir entry: {raw!r}")
 
-        if len(files) >= max_files:
+        if len(files) + overflow >= hard_ceiling:
             break
 
-    return files[:max_files], warnings, requested, abs_mtimes
+    return files, warnings, requested, abs_mtimes, len(files) + overflow
 
 
 class _OcrState:
@@ -2018,14 +2076,16 @@ def index_local(
         walk_skip_counts: dict = {}
         walk_skip_paths: dict = {}
         if paths:
-            doc_files, discover_warnings, requested_rels, abs_mtimes = _resolve_explicit_paths(
+            (
+                doc_files, discover_warnings, requested_rels, abs_mtimes,
+                discovered_count,
+            ) = _resolve_explicit_paths(
                 folder_path,
                 list(paths),
                 max_files=max_files,
                 follow_symlinks=follow_symlinks,
                 include_dot_dirs=include_dot_dirs,
             )
-            discovered_count = len(doc_files)
         else:
             doc_files, discover_warnings, discovered_count, abs_mtimes = discover_doc_files(
                 folder_path,
