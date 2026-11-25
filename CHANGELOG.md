@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [1.151.6] - 2026-11-24 - a `paths` call keeps the walk's secret check and cap report
+
+### Fixed - a file listed in `paths` is refused as a secret like the walk refuses it (#216)
+
+`index_local(paths=[...])` skipped `is_secret_file` for a listed file, so it
+indexed a file the folder walk refuses. A listed file now meets the secret
+check on its root-relative path and is skipped with the walk's warning
+(`Skipped secret file: <path>`). A listed directory now matches secret
+patterns on the root-relative path too, so `paths=[".docker"]` no longer
+stores `.docker/config.json`, and `paths=[".config"]` no longer stores
+`.config/gh/hosts.yml`. Explicit `paths` still bypass `.gitignore`; they no
+longer bypass the secret check. Reported by @rknighton.
+
+### Fixed - a `paths` call over `max_files` reports `truncated: true` (#217)
+
+On the `paths` route the discovered count was the already-capped number of
+kept files, so a call that dropped files at `max_files` said
+`truncated: false` and gave no cap warning. The count now covers every
+indexable file the listed entries hold, past the cap, with overlapping
+entries counted once and the same safety ceiling the walk uses. A capped
+`paths` call now reports `truncated`, `discovered`, `indexed` and the
+`max_files` warning, as the walk has since #15. The files kept are chosen as
+before. Reported by @rknighton.
+
 ## [1.151.5] - 2026-11-23 - every paid license now covers all three jMunch tools
 
 ### Changed - every paid license now covers all three jMunch tools
